@@ -1,6 +1,7 @@
 # StealthNET Admin Panel
 
-Панель управления для VPN сервиса StealthNET с поддержкой тарифов, платежей, реферальной программы и системы поддержки.
+Панель управления для VPN панели Remnawave с поддержкой тарифов, платежей, реферальной программы и системы поддержки. А также интеграцией bedolaga-bot
+
 
 
 <img width="2037" height="1019" alt="image" src="https://github.com/user-attachments/assets/521f0bce-5d88-4da4-a655-f8535c63fcc6" />
