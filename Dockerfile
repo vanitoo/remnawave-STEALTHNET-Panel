@@ -15,11 +15,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Копирование приложения
 COPY app.py .
-COPY instance/ ./instance/ 2>/dev/null || true
-COPY templates/ ./templates/ 2>/dev/null || true
 
 # Создание директорий для данных
-RUN mkdir -p /app/data /app/instance/cache
+RUN mkdir -p /app/data /app/instance/cache /app/templates
+
+# Копирование опциональных директорий (если они существуют)
+# Используем условное копирование через временную директорию
+COPY . /tmp/build/
+RUN set -e; \
+    if [ -d "/tmp/build/instance" ] && [ "$(ls -A /tmp/build/instance 2>/dev/null)" ]; then \
+        cp -r /tmp/build/instance/* /app/instance/ 2>/dev/null || true; \
+    fi; \
+    if [ -d "/tmp/build/templates" ] && [ "$(ls -A /tmp/build/templates 2>/dev/null)" ]; then \
+        cp -r /tmp/build/templates/* /app/templates/ 2>/dev/null || true; \
+    fi; \
+    rm -rf /tmp/build
 
 # Переменные окружения по умолчанию
 ENV FLASK_APP=app.py
