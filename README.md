@@ -1,6 +1,7 @@
 # 🛡️ StealthNET VPN — Система управления VPN-бизнесом
 
 Полнофункциональная система управления VPN-сервисом с административной панелью, клиентским личным кабинетом, Telegram ботом и интеграцией платежных систем.
+![stealthnet](https://github.com/user-attachments/assets/bd5fc60c-a040-4523-a1c4-1c99e26230c3)
 
 ## 📋 Содержание
 
@@ -59,7 +60,7 @@ React-приложение для администраторов с полным
 - 🎨 Брендинг — настройка логотипа и текстов
 - ⚙️ Настройки — системные параметры
 
-### 3. Telegram Bot (`client_bot.py`)
+### 3. Telegram Bot (`client_bot.py`) - В разработке 
 Telegram бот для клиентов с полным функционалом личного кабинета.
 
 **Функции:**
@@ -72,7 +73,7 @@ Telegram бот для клиентов с полным функционалом
 - 📱 Web App (Mini-App)
 - 🔐 Регистрация прямо в боте
 
-### 4. Telegram Mini-App (`miniapp/`)
+### 4. Telegram Mini-App (`miniapp/`) - В разработке
 Веб-приложение, встроенное в Telegram, с современным дизайном и полным функционалом.
 
 **Возможности:**
@@ -172,7 +173,7 @@ Docker установка — самый простой и быстрый спо
 
 ```bash
 # 1. Клонируйте репозиторий в любую директорию (например, /opt/)
-git clone https://github.com/yourusername/stealthnet-vpn.git /opt/stealthnet
+git clone https://github.com/GOFONCK/STEALTHNET-Admin-Panel.git /opt/stealthnet
 cd /opt/stealthnet
 
 # Или если уже склонировали в другую директорию
@@ -273,8 +274,8 @@ docker-compose logs -f nginx
 ### 1. Клонирование репозитория
 
 ```bash
-git clone https://github.com/yourusername/stealthnet-vpn.git
-cd stealthnet-vpn
+git clone https://github.com/GOFONCK/STEALTHNET-Admin-Panel.git
+cd STEALTHNET-Admin-Panel
 ```
 
 ### 2. Настройка Backend (Flask API)
@@ -299,36 +300,17 @@ python scripts/init_db.py
 
 # Создайте администратора
 python -m flask --app app make-admin your@email.com
+
 ```
 
 ### 3. Настройка Admin Panel
-
-```bash
-cd admin-panel
-
-# Установите зависимости
-npm install
-
-# Создайте production build
-npm run build
-
 # Скопируйте build в директорию для веб-сервера
 # Например, для Nginx:
 # cp -r build/* /var/www/stealthnet/
+
 ```
 
-### 4. Настройка Telegram Bot
-
-```bash
-# Установите зависимости для бота
-pip install -r client_bot_requirements.txt
-
-# Добавьте в .env:
-# CLIENT_BOT_TOKEN=your_telegram_bot_token
-# FLASK_API_URL=http://localhost:5000
-```
-
-### 5. Настройка веб-сервера
+### 4. Настройка веб-сервера
 
 #### Nginx
 
@@ -391,38 +373,16 @@ your-domain.com {
 sudo caddy run
 ```
 
-### 6. Запуск в продакшене
+### 5. Запуск в продакшене
 
 #### Flask API (Gunicorn)
 
-```bash
-# Используйте systemd сервис
-sudo cp config/flask_api.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable flask_api
-sudo systemctl start flask_api
 
-# Или запустите вручную
+# запустите вручную
 gunicorn -c config/gunicorn_config.py app:app
 ```
 
 Подробнее: [docs/GUNICORN_SETUP.md](docs/GUNICORN_SETUP.md)
-
-#### Telegram Bot (Systemd)
-
-```bash
-sudo cp config/client_bot.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable client_bot
-sudo systemctl start client_bot
-
-# Или запустите вручную
-python client_bot.py
-```
-
-### 7. Настройка Mini-App
-
-Mini-App находится в папке `miniapp/` и готов к использованию. Просто разместите файлы на вашем веб-сервере в директории `/miniapp/`.
 
 ## ⚙️ Настройка
 
@@ -451,9 +411,6 @@ MAIL_PORT=465
 MAIL_USERNAME=your_email@gmail.com
 MAIL_PASSWORD=your_email_password
 
-# Database (для ручной установки)
-SQLALCHEMY_DATABASE_URI=sqlite:///stealthnet.db
-```
 
 ### Генерация ключей
 
@@ -473,31 +430,10 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 python scripts/generate_fernet_key.py
 ```
 
-### Запуск в продакшене
-
-#### Flask API (Gunicorn)
-
-```bash
-# Используйте systemd сервис
-sudo cp config/flask_api.service /etc/systemd/system/
-sudo systemctl enable flask_api
-sudo systemctl start flask_api
-```
-
-Подробнее: [docs/GUNICORN_SETUP.md](docs/GUNICORN_SETUP.md)
-
-#### Telegram Bot (Systemd)
-
-```bash
-sudo cp config/client_bot.service /etc/systemd/system/
-sudo systemctl enable client_bot
-sudo systemctl start client_bot
-```
-
 ## 📁 Структура проекта
 
 ```
-Готовый проект/
+STEALTHNET-Admin-Panel/
 ├── app.py                      # Flask API (основной файл)
 ├── requirements.txt            # Python зависимости
 ├── env.example                 # Пример переменных окружения
@@ -574,20 +510,7 @@ sudo systemctl start client_bot
 - [Описание Admin Panel](docs/ADMIN_PANEL_DESCRIPTION.md)
 - [Описание продукта](docs/PRODUCT_DESCRIPTION.md)
 - [Настройка Gunicorn](docs/GUNICORN_SETUP.md)
-- [Инструкции по миграциям](docs/MIGRATION_INSTRUCTIONS.md)
-- [Telegram Mini-App](miniapp/README.md)
 
-## 🔧 Миграции базы данных
-
-При обновлении системы может потребоваться выполнить миграции БД:
-
-```bash
-# Через Flask CLI (если доступно)
-flask migrate-yookassa-fields
-
-# Или через скрипт
-python migrations/migrate_add_yookassa_fields.py
-```
 
 Подробнее: [docs/MIGRATION_INSTRUCTIONS.md](docs/MIGRATION_INSTRUCTIONS.md)
 
@@ -638,7 +561,7 @@ docker-compose exec api python -m flask --app app make-admin your@email.com
 
 ## 📞 Поддержка
 
-- **Email:** support@stealthnet.app
+- **Email:** admin@stealthnet.app
 - **Telegram:** @stealthnet_support
 
 ## 📄 Лицензия
@@ -649,7 +572,20 @@ docker-compose exec api python -m flask --app app make-admin your@email.com
 
 Спасибо всем, кто использует и развивает этот проект!
 
+💰 Наши реквизиты для поддержки (Криптовалюта):
+Мы принимаем донаты в криптовалюте. Пожалуйста, убедитесь, что вы отправляете средства в подходящей сети для каждого адреса.
+
+Адрес для (TRX/USDT-TRC20 и аналогичных): TWG5eK5Yc4BRHhaMc1GncPtj2pP3mfJ7ag
+
+Адрес для (Ethereum / BSC / EVM-совместимые сети): 0x7cfD59365ee3C97576fe387886b55298c9CeAc5E
+
+Адрес для (Ethereum / BSC / EVM-совместимые сети): 0x23cB77312DC0163d80d8bf23df272aCD21177846
+
+Либо  звездами тг ⭐️
+Огромное вам спасибо за вашу веру в наш проект! Вместе мы сильнее! 💪
+
 ---
 
 **StealthNET VPN** — Ваша свобода в цифровом мире 🛡️
+
 
