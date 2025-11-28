@@ -455,34 +455,6 @@ STEALTHNET-Admin-Panel/
 │   ├── nginx.conf             # Конфигурация Nginx
 │   └── Caddyfile              # Конфигурация Caddy
 │
-├── migrations/                 # Скрипты миграций БД
-│   ├── migrate_add_badge.py
-│   ├── migrate_add_encrypted_password.py
-│   ├── migrate_add_heleket.py
-│   ├── migrate_add_promo_code_id.py
-│   ├── migrate_add_telegram_bot_token.py
-│   ├── migrate_add_telegram_fields.py
-│   └── migrate_add_yookassa_fields.py
-│
-├── scripts/                    # Вспомогательные скрипты
-│   ├── init_db.py              # Инициализация БД
-│   ├── generate_fernet_key.py  # Генерация ключа шифрования
-│   └── test_local_setup.py     # Тестирование
-│
-├── config/                     # Конфигурационные файлы
-│   ├── gunicorn_config.py      # Конфигурация Gunicorn
-│   ├── flask_api.service       # Systemd сервис для Flask
-│   ├── client_bot.service      # Systemd сервис для бота
-│   └── *.txt                   # Дополнительные конфиги
-│
-├── docs/                       # Документация
-│   ├── CLIENT_BOT_README.md    # Документация Telegram бота
-│   ├── ADMIN_PANEL_DESCRIPTION.md
-│   ├── PRODUCT_DESCRIPTION.md
-│   ├── GUNICORN_SETUP.md
-│   ├── MIGRATION_INSTRUCTIONS.md
-│   └── ...
-│
 ├── frontend/                   # Готовый фронтенд (React build)
 │   └── build/                  # Production build
 │       ├── index.html
@@ -493,9 +465,6 @@ STEALTHNET-Admin-Panel/
 ├── templates/                  # Email шаблоны
 │   ├── email_verification.html
 │   └── email_broadcast.html
-│
-├── data/                       # Данные приложения (Docker)
-│   └── stealthnet.db           # SQLite база данных
 │
 └── instance/                   # Экземпляр приложения (ручная установка)
     ├── stealthnet.db           # SQLite база данных
@@ -508,32 +477,6 @@ STEALTHNET-Admin-Panel/
 - [🐳 Docker Setup Guide](./DOCKER_SETUP.md) - Подробная инструкция по Docker
 - [⚡ Quick Start Guide](./QUICKSTART.md) - Быстрый старт с Docker
 
-### Общая документация
-- [Документация Telegram бота](docs/CLIENT_BOT_README.md)
-- [Описание Admin Panel](docs/ADMIN_PANEL_DESCRIPTION.md)
-- [Описание продукта](docs/PRODUCT_DESCRIPTION.md)
-- [Настройка Gunicorn](docs/GUNICORN_SETUP.md)
-
-
-Подробнее: [docs/MIGRATION_INSTRUCTIONS.md](docs/MIGRATION_INSTRUCTIONS.md)
-
-## 🚀 Быстрый старт
-
-### Через Docker (рекомендуется)
-
-```bash
-# 1. Настройте .env
-cp env.example .env
-nano .env  # Заполните переменные
-
-# 2. Запустите
-docker-compose up -d
-
-# 3. Создайте администратора
-docker-compose exec api python -m flask --app app make-admin your@email.com
-
-# Готово! Откройте http://your-server-ip
-```
 
 ### Вручную
 
@@ -547,20 +490,6 @@ docker-compose exec api python -m flask --app app make-admin your@email.com
 8. **Настройте веб-сервер** (Nginx/Caddy) для фронтенда
 9. **Запустите Telegram бота:** `python client_bot.py`
 
-## 🐛 Решение проблем
-
-### Ошибки базы данных
-Если возникают ошибки типа `no such column`, выполните соответствующие миграции из папки `migrations/`.
-
-### Проблемы с Telegram ботом
-- Проверьте `CLIENT_BOT_TOKEN` в `.env`
-- Убедитесь, что Flask API запущен и доступен
-- Проверьте логи бота
-
-### Проблемы с платежами
-- Проверьте настройки платежных систем в админ-панели
-- Убедитесь, что webhook URL правильно настроен
-- Проверьте логи Flask API
 
 ## 📞 Поддержка
 
@@ -590,6 +519,7 @@ docker-compose exec api python -m flask --app app make-admin your@email.com
 ---
 
 **StealthNET VPN** — Ваша свобода в цифровом мире 🛡️
+
 
 
 
