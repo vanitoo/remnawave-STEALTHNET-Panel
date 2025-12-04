@@ -292,7 +292,7 @@ python3 migrate_add_yookassa_fields.py
 ## 📞 Поддержка
 
 - **Email:** admin@stealthnet.app
-- **Telegram:** @stealthnet_support
+- **Telegram:** @StealthNet_Admin
 
 ## 📄 Лицензия
 
@@ -305,6 +305,7 @@ python3 migrate_add_yookassa_fields.py
 ---
 
 **StealthNET VPN** — Ваша свобода в цифровом мире 🛡️
+
 
 
 
