@@ -222,14 +222,11 @@ Telegram бот для клиентов с полным функционалом
    # server_name panel.stealthnet.app;  # или ваш IP адрес
    
    # Для продакшена с HTTPS (после получения SSL сертификата):
-   # 1. Раскомментируйте блок с HTTPS в nginx/nginx.conf
-   # 2. Получите SSL сертификат (Let's Encrypt):
+   # 1. Получите SSL сертификат (Let's Encrypt):
    #    certbot certonly --standalone -d panel.stealthnet.app --email your@email.com --agree-tos
-   # 3. Скопируйте SSL сертификаты:
+   # 2. Скопируйте SSL сертификаты:
    #    cp /etc/letsencrypt/live/panel.stealthnet.app/fullchain.pem nginx/ssl/
    #    cp /etc/letsencrypt/live/panel.stealthnet.app/privkey.pem nginx/ssl/
-   # 4. Перезапустите Nginx:
-   #    docker compose restart nginx
    ```
 
 5. **Запустите проект**:
@@ -416,3 +413,4 @@ docker compose logs api
 **Или звездами Telegram ⭐️**
 
 Огромное вам спасибо за вашу веру в наш проект! Вместе мы сильнее! 💪
+
