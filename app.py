@@ -49,6 +49,16 @@ if REMNAWAVE_COOKIES_STR:
         REMNAWAVE_COOKIES = json.loads(REMNAWAVE_COOKIES_STR)
     except json.JSONDecodeError:
         print(f"⚠️ Warning: REMNAWAVE_COOKIES is not valid JSON, ignoring: {REMNAWAVE_COOKIES_STR}")
+# Создаем необходимые директории ДО инициализации Flask
+db_uri_env = os.getenv("SQLALCHEMY_DATABASE_URI", "sqlite:///instance/stealthnet.db")
+if db_uri_env.startswith("sqlite:///") and not db_uri_env.startswith("sqlite:////"):
+    db_path_env = db_uri_env.replace("sqlite:///", "")
+    if not os.path.isabs(db_path_env):
+        abs_db_path_env = os.path.abspath(db_path_env)
+        db_dir_env = os.path.dirname(abs_db_path_env)
+        if db_dir_env and not os.path.exists(db_dir_env):
+            os.makedirs(db_dir_env, exist_ok=True)
+            print(f"✅ Created database directory: {db_dir_env}")
 
 app = Flask(__name__)
 
