@@ -327,13 +327,25 @@ def get_system_info():
 def telegram_auth_enabled():
     """Проверка Telegram авторизации"""
     try:
+        # Приоритет: TELEGRAM_BOT_NAME из .env -> BotConfig из БД
+        telegram_bot_name = os.getenv("TELEGRAM_BOT_NAME", "").strip()
+        
+        if telegram_bot_name:
+            return jsonify({
+                "enabled": True,
+                "bot_name": telegram_bot_name,
+                "bot_username": telegram_bot_name
+            }), 200
+        
+        # Fallback: проверяем BotConfig из БД
         bot_config = BotConfig.query.first()
         if bot_config and bot_config.bot_username:
             return jsonify({
                 "enabled": True,
-                "bot_username": bot_config.bot_username,
-                "telegram_bot_name": os.getenv("TELEGRAM_BOT_NAME", "")
+                "bot_name": bot_config.bot_username,
+                "bot_username": bot_config.bot_username
             }), 200
+        
         return jsonify({"enabled": False, "message": "Telegram bot not configured"}), 200
     except Exception as e:
         return jsonify({"enabled": False, "message": "Error checking Telegram auth"}), 200
