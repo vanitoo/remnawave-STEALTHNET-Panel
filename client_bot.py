@@ -102,7 +102,11 @@ def get_bot_config() -> dict:
         'translations': {},
         'welcome_messages': {},
         'user_agreements': {},
-        'offer_texts': {}
+        'offer_texts': {},
+        'require_channel_subscription': False,
+        'channel_id': '',
+        'channel_url': '',
+        'channel_subscription_texts': {}
     }
 
 def get_service_name() -> str:
@@ -374,18 +378,28 @@ def build_main_menu_keyboard(user_lang: str, is_active: bool, subscription_url: 
 
 async def check_channel_subscription(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Проверить, подписан ли пользователь на канал"""
-    if not is_channel_subscription_required():
+    is_required = is_channel_subscription_required()
+    logger.info(f"Channel subscription check: required={is_required}, user_id={user_id}")
+    
+    if not is_required:
+        logger.info("Channel subscription not required, allowing access")
         return True
     
     channel_id = get_channel_id()
+    logger.info(f"Channel ID from config: '{channel_id}'")
+    
     if not channel_id:
+        logger.warning("Channel ID is empty, allowing access")
         return True
     
     try:
+        # Пробуем использовать channel_id как есть (может быть числовым ID или username)
         member = await context.bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-        return member.status in ['member', 'administrator', 'creator']
+        is_subscribed = member.status in ['member', 'administrator', 'creator']
+        logger.info(f"User {user_id} subscription status: {member.status}, subscribed={is_subscribed}")
+        return is_subscribed
     except Exception as e:
-        logger.warning(f"Error checking channel subscription: {e}")
+        logger.warning(f"Error checking channel subscription for user {user_id}, channel '{channel_id}': {e}")
         return True  # В случае ошибки пропускаем проверку
 
 
@@ -4164,10 +4178,14 @@ async def register_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Проверяем подписку на канал если требуется
     if is_channel_subscription_required():
+        logger.info(f"Channel subscription required, checking for user {telegram_id}")
         is_subscribed = await check_channel_subscription(telegram_id, context)
         if not is_subscribed:
+            logger.info(f"User {telegram_id} is not subscribed, showing subscription requirement")
             await show_channel_subscription_required(update, context)
             return
+        else:
+            logger.info(f"User {telegram_id} is subscribed, proceeding with registration")
     
     # Начинаем процесс регистрации - сначала выбор языка
     # Используем русский по умолчанию для незарегистрированных
