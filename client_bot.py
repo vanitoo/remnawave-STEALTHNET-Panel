@@ -53,7 +53,7 @@ LOGO_PATH = os.path.join(os.path.dirname(__file__), "logo.png")
 _bot_config_cache = {
     'data': None,
     'last_update': 0,
-    'cache_ttl': 10  # 10 секунд — для быстрого обновления при изменении в админке
+    'cache_ttl': 5  # 5 секунд — для быстрого обновления при изменении в админке
 }
 
 def clear_bot_config_cache():
@@ -149,6 +149,87 @@ def get_trial_days() -> int:
     """Получить количество дней триала"""
     config = get_bot_config()
     return config.get('trial_days', 3)
+
+# Кеш настроек триала
+_trial_settings_cache = {
+    'data': None,
+    'last_update': 0,
+    'cache_ttl': 30  # 30 секунд
+}
+
+def clear_trial_settings_cache():
+    """Очистить кеш настроек триала"""
+    _trial_settings_cache['data'] = None
+    _trial_settings_cache['last_update'] = 0
+
+def get_trial_settings() -> dict:
+    """Получить настройки триала из API с кешированием"""
+    import time
+    
+    current_time = time.time()
+    
+    # Возвращаем из кеша если не истёк
+    if _trial_settings_cache['data'] and (current_time - _trial_settings_cache['last_update']) < _trial_settings_cache['cache_ttl']:
+        return _trial_settings_cache['data']
+    
+    # Загружаем из API
+    try:
+        response = requests.get(f"{FLASK_API_URL}/api/public/trial-settings", timeout=5)
+        if response.status_code == 200:
+            settings = response.json()
+            _trial_settings_cache['data'] = settings
+            _trial_settings_cache['last_update'] = current_time
+            return settings
+    except Exception as e:
+        logger.warning(f"Failed to load trial settings from API: {e}")
+    
+    # Возвращаем кеш даже если истёк
+    if _trial_settings_cache['data']:
+        return _trial_settings_cache['data']
+    
+    # Дефолтные настройки
+    return {
+        'days': 3,
+        'devices': 3,
+        'traffic_limit_bytes': 0,
+        'enabled': True,
+        'button_text_ru': '🎁 Попробовать бесплатно ({days} дня)',
+        'button_text_ua': '🎁 Спробувати безкоштовно ({days} дні)',
+        'button_text_en': '🎁 Try Free ({days} Days)',
+        'button_text_cn': '🎁 免费试用 ({days} 天)'
+    }
+
+def get_trial_button_text(lang: str = 'ru') -> str:
+    """Получить текст кнопки триала для указанного языка"""
+    settings = get_trial_settings()
+    
+    if not settings.get('enabled', True):
+        # Если триал отключен, возвращаем пустую строку (кнопка не должна отображаться)
+        return ''
+    
+    days = settings.get('days', 3)
+    button_text_key = f'button_text_{lang}'
+    button_text = settings.get(button_text_key, '')
+    
+    # Если нет текста для языка, используем русский
+    if not button_text and lang != 'ru':
+        button_text = settings.get('button_text_ru', '')
+    
+    # Заменяем {days} на актуальное значение
+    if button_text:
+        button_text = button_text.replace('{days}', str(days))
+    
+    # Если текст всё ещё пустой, используем дефолтный
+    if not button_text:
+        default_texts = {
+            'ru': f'🎁 Попробовать бесплатно ({days} дня)',
+            'ua': f'🎁 Спробувати безкоштовно ({days} дні)',
+            'en': f'🎁 Try Free ({days} Days)',
+            'cn': f'🎁 免费试用 ({days} 天)'
+        }
+        button_text = default_texts.get(lang, default_texts['ru'])
+    
+    return button_text
 
 def is_channel_subscription_required() -> bool:
     """Проверить, требуется ли подписка на канал"""
@@ -346,7 +427,15 @@ def build_main_menu_keyboard(user_lang: str, is_active: bool, subscription_url: 
         
         # Создаём кнопку
         def create_button(b_id, b_def):
-            text = f"{b_def['icon']} {get_text(b_def['text_key'], user_lang)}"
+            # Для кнопки триала используем специальный текст из настроек
+            if b_id == 'trial':
+                trial_text = get_trial_button_text(user_lang)
+                if not trial_text:  # Если триал отключен, пропускаем кнопку
+                    return None
+                text = f"{b_def['icon']} {trial_text}"
+            else:
+                text = f"{b_def['icon']} {get_text(b_def['text_key'], user_lang)}"
+            
             if b_def['type'] == 'url':
                 return InlineKeyboardButton(text, url=b_def['url'])
             elif b_def['type'] == 'webapp':
@@ -354,23 +443,34 @@ def build_main_menu_keyboard(user_lang: str, is_active: bool, subscription_url: 
             else:
                 return InlineKeyboardButton(text, callback_data=b_def['callback_data'])
         
+        # Создаём кнопку
+        button = create_button(btn_id, btn_def)
+        
+        # Пропускаем кнопку если она None (например, триал отключен)
+        if button is None:
+            i += 1
+            continue
+        
         # Если кнопка одиночная или это последняя кнопка
         if btn_def['single'] or i == len(visible_buttons) - 1:
-            keyboard.append([create_button(btn_id, btn_def)])
+            keyboard.append([button])
             i += 1
         else:
             # Пытаемся создать пару
             next_btn_id, next_btn_def = visible_buttons[i + 1]
-            if next_btn_def['single']:
+            next_button = create_button(next_btn_id, next_btn_def)
+            
+            # Если следующая кнопка None, текущую одну
+            if next_button is None:
+                keyboard.append([button])
+                i += 1
+            elif next_btn_def['single']:
                 # Следующая одиночная — текущую одну
-                keyboard.append([create_button(btn_id, btn_def)])
+                keyboard.append([button])
                 i += 1
             else:
                 # Обе парные — создаём ряд из 2
-                keyboard.append([
-                    create_button(btn_id, btn_def),
-                    create_button(next_btn_id, next_btn_def)
-                ])
+                keyboard.append([button, next_button])
                 i += 2
     
     return keyboard
@@ -530,8 +630,41 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
     has_photo = message.photo is not None and len(message.photo) > 0
     has_text = message.text is not None
     
-    # Сначала пробуем отредактировать caption (если это фото)
-    if has_photo:
+    # Если у нас есть логотип и мы хотим его показать, удаляем старое сообщение (даже если это фото)
+    # и отправляем новое с логотипом. Это нужно, чтобы вернуться от изображения тарифа к логотипу.
+    if has_photo and os.path.exists(LOGO_PATH):
+        # Удаляем старое сообщение с изображением (например, изображение тарифа)
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.debug(f"Could not delete old photo message: {e}")
+        
+        # Отправляем новое сообщение с логотипом
+        try:
+            with open(LOGO_PATH, 'rb') as logo_file:
+                return await context.bot.send_photo(
+                    chat_id=message.chat.id,
+                    photo=logo_file,
+                    caption=display_text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+        except Exception as e2:
+            logger.warning(f"Error sending photo with logo: {e2}")
+            # Fallback: отправляем без форматирования
+            try:
+                with open(LOGO_PATH, 'rb') as logo_file:
+                    return await context.bot.send_photo(
+                        chat_id=message.chat.id,
+                        photo=logo_file,
+                        caption=clean_markdown_for_cards(display_text),
+                        reply_markup=reply_markup
+                    )
+            except Exception as e3:
+                logger.error(f"Failed to send photo: {e3}")
+    
+    # Если нет логотипа, пробуем отредактировать caption (если это фото)
+    elif has_photo:
         try:
             await query.edit_message_caption(
                 caption=display_text,
@@ -2081,12 +2214,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        text = f"👋 {get_text('welcome_bot', lang)}\n\n"
-        text += f"❌ {get_text('not_registered_text', lang)}\n\n"
-        text += f"📝 {get_text('register_here', lang)}\n\n"
-        text += f"💡 {get_text('after_register', lang)}"
-        if referral_code:
-            text += f"\n\n🎁 Реферальный код: `{referral_code}`"
+        # Проверяем, есть ли кастомное приветственное сообщение для незарегистрированных
+        custom_welcome = get_custom_welcome_message(lang)
+        if custom_welcome and custom_welcome.strip():
+            # Используем кастомное сообщение
+            text = custom_welcome.replace('{SERVICE_NAME}', get_service_name())
+            text = text.replace('{USER_NAME}', user.first_name or '')
+            text = text.replace('{user_name}', user.first_name or '')
+            if referral_code:
+                text += f"\n\n🎁 Реферальный код: `{referral_code}`"
+        else:
+            # Стандартное сообщение
+            text = f"👋 {get_text('welcome_bot', lang)}\n\n"
+            text += f"❌ {get_text('not_registered_text', lang)}\n\n"
+            text += f"📝 {get_text('register_here', lang)}\n\n"
+            text += f"💡 {get_text('after_register', lang)}"
+            if referral_code:
+                text += f"\n\n🎁 Реферальный код: `{referral_code}`"
         
         await reply_with_logo(update, text, reply_markup=reply_markup)
         return
@@ -2102,90 +2246,115 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Получаем язык пользователя
     user_lang = get_user_lang(user_data, context, token)
     
-    # Формируем приветственное сообщение с подробной информацией
-    welcome_text = f"🛡 **{get_text('stealthnet_bot', user_lang)}**\n"
-    welcome_text += f"👋 {get_text('welcome_user', user_lang)}, {user.first_name}!\n"
-    welcome_text += "━━━━━━━━━━━━━━━\n"
-    
-    # Баланс
-    balance = user_data.get("balance", 0)
-    preferred_currency = user_data.get("preferred_currency", "uah")
-    currency_symbol = {"uah": "₴", "rub": "₽", "usd": "$"}.get(preferred_currency, "₴")
-    welcome_text += f"💰 **{get_text('balance', user_lang)}:** {balance:.2f} {currency_symbol}\n"
-    
-    # Статус подписки
+    # Получаем данные для клавиатуры
     is_active = user_data.get("activeInternalSquads", [])
     expire_at = user_data.get("expireAt")
     subscription_url = user_data.get("subscriptionUrl", "")
     used_traffic = user_data.get("usedTrafficBytes", 0)
     traffic_limit = user_data.get("trafficLimitBytes", 0)
     
+    # Проверяем, есть ли активная подписка (не истекшая)
+    has_active_subscription = False
+    expire_date = None
+    days_left = 0
+    
     if is_active and expire_at:
         expire_date = datetime.fromisoformat(expire_at.replace('Z', '+00:00'))
-        days_left = (expire_date - datetime.now(expire_date.tzinfo)).days
+        now = datetime.now(expire_date.tzinfo)
+        delta = expire_date - now
+        days_left = delta.days
         
-        # Статус с индикатором - в одну строку
-        status_icon = "🟢" if days_left > 7 else "🟡" if days_left > 0 else "🔴"
-        welcome_text += f"📊 **{get_text('subscription_status_title', user_lang)}** - {status_icon} {get_text('active', user_lang)}\n"
-        
-        # Дата с "до"
-        if user_lang == 'ru':
-            welcome_text += f"📅 до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
-        elif user_lang == 'ua':
-            welcome_text += f"📅 до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
-        elif user_lang == 'en':
-            welcome_text += f"📅 until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
-        else:
-            welcome_text += f"📅 {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
-        
-        # Дни с правильным склонением
-        if user_lang == 'ru':
-            if days_left == 1:
-                days_text = f"{days_left} день"
-            elif 2 <= days_left <= 4:
-                days_text = f"{days_left} дня"
-            else:
-                days_text = f"{days_left} дней"
-            welcome_text += f"⏰ осталось {days_text}\n"
-        elif user_lang == 'ua':
-            if days_left == 1:
-                days_text = f"{days_left} день"
-            elif 2 <= days_left <= 4:
-                days_text = f"{days_left} дні"
-            else:
-                days_text = f"{days_left} днів"
-            welcome_text += f"⏰ залишилось {days_text}\n"
-        elif user_lang == 'en':
-            days_text = f"{days_left} day{'s' if days_left != 1 else ''}"
-            welcome_text += f"⏰ {days_text} left\n"
-        else:
-            days_text = get_days_text(days_left, user_lang)
-            welcome_text += f"⏰ {days_text}\n"
-        
-        # Трафик - в одну строку
-        if traffic_limit == 0:
-            welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
-        else:
-            used_gb = used_traffic / (1024 ** 3)
-            limit_gb = traffic_limit / (1024 ** 3)
-            percentage = (used_traffic / traffic_limit * 100) if traffic_limit > 0 else 0
-            
-            filled = int(percentage / (100 / 15))
-            filled = min(filled, 15)
-            progress_bar = "█" * filled + "░" * (15 - filled)
-            progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
-            
-            welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
-        
-        welcome_text += "━━━━━━━━━━━━━━━\n"
+        # Подписка активна только если не истекла
+        has_active_subscription = days_left > 0
+    
+    # Проверяем, есть ли кастомное приветственное сообщение
+    custom_welcome = get_custom_welcome_message(user_lang)
+    
+    # Формируем приветственное сообщение
+    if custom_welcome and custom_welcome.strip():
+        # Используем кастомное приветственное сообщение
+        # Заменяем {SERVICE_NAME} и {USER_NAME} если есть
+        welcome_text = custom_welcome.replace('{SERVICE_NAME}', get_service_name())
+        welcome_text = welcome_text.replace('{USER_NAME}', user.first_name or '')
+        welcome_text = welcome_text.replace('{user_name}', user.first_name or '')
+        # Если кастомное сообщение есть, используем его полностью (без добавления баланса и т.д.)
     else:
-        welcome_text += f"📊 **{get_text('subscription_status_title', user_lang)}**\n"
-        welcome_text += f"🔴 {get_text('inactive', user_lang)}\n"
-        welcome_text += f"💡 {get_text('activate_trial_button', user_lang)}\n"
+        # Стандартное приветствие с подробной информацией
+        welcome_text = f"🛡 **{get_text('stealthnet_bot', user_lang)}**\n"
+        welcome_text += f"👋 {get_text('welcome_user', user_lang)}, {user.first_name}!\n"
         welcome_text += "━━━━━━━━━━━━━━━\n"
+        
+        # Баланс
+        balance = user_data.get("balance", 0)
+        preferred_currency = user_data.get("preferred_currency", "uah")
+        currency_symbol = {"uah": "₴", "rub": "₽", "usd": "$"}.get(preferred_currency, "₴")
+        welcome_text += f"💰 **{get_text('balance', user_lang)}:** {balance:.2f} {currency_symbol}\n"
+        
+        # Статус подписки
+        if has_active_subscription and expire_date:
+            # Статус с индикатором - в одну строку
+            status_icon = "🟢" if days_left > 7 else "🟡" if days_left > 0 else "🔴"
+            welcome_text += f"📊 **{get_text('subscription_status_title', user_lang)}** - {status_icon} {get_text('active', user_lang)}\n"
+            
+            # Дата с "до"
+            if user_lang == 'ru':
+                welcome_text += f"📅 до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            elif user_lang == 'ua':
+                welcome_text += f"📅 до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            elif user_lang == 'en':
+                welcome_text += f"📅 until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            else:
+                welcome_text += f"📅 {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            
+            # Дни с правильным склонением (days_left уже > 0 здесь)
+            if user_lang == 'ru':
+                if days_left == 1:
+                    days_text = f"{days_left} день"
+                elif 2 <= days_left <= 4:
+                    days_text = f"{days_left} дня"
+                else:
+                    days_text = f"{days_left} дней"
+                welcome_text += f"⏰ осталось {days_text}\n"
+            elif user_lang == 'ua':
+                if days_left == 1:
+                    days_text = f"{days_left} день"
+                elif 2 <= days_left <= 4:
+                    days_text = f"{days_left} дні"
+                else:
+                    days_text = f"{days_left} днів"
+                welcome_text += f"⏰ залишилось {days_text}\n"
+            elif user_lang == 'en':
+                days_text = f"{days_left} day{'s' if days_left != 1 else ''}"
+                welcome_text += f"⏰ {days_text} left\n"
+            else:
+                days_text = get_days_text(days_left, user_lang)
+                welcome_text += f"⏰ {days_text}\n"
+            
+            # Трафик - в одну строку
+            if traffic_limit == 0:
+                welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
+            else:
+                used_gb = used_traffic / (1024 ** 3)
+                limit_gb = traffic_limit / (1024 ** 3)
+                percentage = (used_traffic / traffic_limit * 100) if traffic_limit > 0 else 0
+                
+                filled = int(percentage / (100 / 15))
+                filled = min(filled, 15)
+                progress_bar = "█" * filled + "░" * (15 - filled)
+                progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
+                
+                welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
+            
+            welcome_text += "━━━━━━━━━━━━━━━\n"
+        else:
+            welcome_text += f"📊 **{get_text('subscription_status_title', user_lang)}**\n"
+            welcome_text += f"🔴 {get_text('inactive', user_lang)}\n"
+            welcome_text += f"💡 {get_text('activate_trial_button', user_lang)}\n"
+            welcome_text += "━━━━━━━━━━━━━━━\n"
     
     # Кнопки главного меню - строим динамически из конфига
-    keyboard = build_main_menu_keyboard(user_lang, is_active, subscription_url, expire_at)
+    # Используем has_active_subscription для правильного отображения кнопок
+    keyboard = build_main_menu_keyboard(user_lang, has_active_subscription, subscription_url, expire_at)
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -2256,10 +2425,21 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Баланс
     status_text += f"💰 **Баланс:** {balance:.2f} {currency_symbol}\n\n"
     
+    # Проверяем, есть ли активная подписка (не истекшая)
+    has_active_subscription = False
+    expire_date = None
+    days_left = 0
+    
     if is_active and expire_at:
         expire_date = datetime.fromisoformat(expire_at.replace('Z', '+00:00'))
-        days_left = (expire_date - datetime.now(expire_date.tzinfo)).days
+        now = datetime.now(expire_date.tzinfo)
+        delta = expire_date - now
+        days_left = delta.days
         
+        # Подписка активна только если не истекла
+        has_active_subscription = days_left > 0
+    
+    if has_active_subscription and expire_date:
         # Статус - современный дизайн
         status_icon = "🟢" if days_left > 7 else "🟡" if days_left > 0 else "🔴"
         status_text += f"{status_icon} **{get_text('active', user_lang)}**\n"
@@ -2530,84 +2710,211 @@ async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     branding = api.get_branding()
     features_names = branding.get("tariff_features_names", {})
     
-    # Формируем сообщение
-    tier_name = tier_names.get(tier, tier.capitalize())
-    text = f"{tier_name}\n"
-    text += "━━━━━━━━━━━━━━━\n"
+    # Подготавливаем функции для генерации изображения
+    processed_features = []
+    for feature in features_list[:5]:  # Берем первые 5 функций
+        if isinstance(feature, dict):
+            feature_key = feature.get("key") or feature.get("name")
+            feature_name = feature.get("name") or feature.get("title")
+            # Пробуем получить название из брендинга
+            if feature_key and features_names and isinstance(features_names, dict):
+                branded_name = features_names.get(feature_key)
+                if branded_name:
+                    feature_name = branded_name
+            if not feature_name:
+                feature_name = feature_key or "Функция"
+            
+            icon = feature.get("icon", "✓")
+            processed_features.append({
+                "name": feature_name,
+                "icon": icon
+            })
+        elif isinstance(feature, str):
+            processed_features.append({
+                "name": feature,
+                "icon": "✓"
+            })
     
-    # Показываем функции тарифа, если есть
-    if features_list:
-        text += "✨ **Включено в тариф:**\n"
-        for feature in features_list[:5]:  # Показываем первые 5 функций
-            if isinstance(feature, dict):
-                feature_key = feature.get("key") or feature.get("name")
-                feature_name = feature.get("name") or feature.get("title")
-                # Пробуем получить название из брендинга
-                if feature_key and features_names and isinstance(features_names, dict):
-                    branded_name = features_names.get(feature_key)
-                    if branded_name:
-                        feature_name = branded_name
-                if not feature_name:
-                    feature_name = feature_key or "Функция"
-                
-                icon = feature.get("icon", "✓")
-                text += f"{icon} {feature_name}\n"
-            elif isinstance(feature, str):
-                text += f"✓ {feature}\n"
-        if len(features_list) > 5:
-            text += f"... и еще {len(features_list) - 5} функций\n"
-        text += "\n"
+    # Определяем название тарифа и иконку
+    tier_display_info = {
+        "basic": {"name": basic_name, "icon": "📦"},
+        "pro": {"name": pro_name, "icon": "⭐"},
+        "elite": {"name": elite_name, "icon": "👑"}
+    }
+    tier_info = tier_display_info.get(tier, {"name": tier.capitalize(), "icon": "📦"})
     
-    text += "📅 Выберите длительность:\n\n"
-    
-    # Показываем список тарифов в одну строку
-    for tariff in tier_tariffs:
-        name = tariff.get("name", f"{tariff.get('duration_days', 0)} дней")
-        price = tariff.get(price_field, 0)
-        duration = tariff.get("duration_days", 0)
-        per_day = price / duration if duration > 0 else price
+    # Генерируем изображение
+    try:
+        from modules.image_generator import generate_tariff_image
+        from io import BytesIO
         
-        text += f"📦 {name} | 💰 {price:.0f} {symbol} | 📊 {per_day:.2f} {symbol}/день | ⏱️ {duration} дней\n"
-    
-    text += "━━━━━━━━━━━━━━━\n"
-    
-    # Кнопки выбора длительности
-    keyboard = []
-    row = []
-    for tariff in tier_tariffs:
-        duration = tariff.get("duration_days", 0)
-        name = f"{duration} дн."
-        if len(name) > 15:
-            name = f"{duration}д"
+        # Получаем цвет из брендинга (если есть)
+        primary_color_hex = branding.get("primary_color", "#3f69ff")
+        # Конвертируем hex в RGB tuple
+        try:
+            hex_color = primary_color_hex.lstrip('#')
+            if len(hex_color) == 3:
+                hex_color = ''.join([c*2 for c in hex_color])
+            primary_color = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        except:
+            primary_color = (63, 105, 255)  # Синий по умолчанию
         
-        row.append(InlineKeyboardButton(
-            name,
-            callback_data=f"tariff_{tariff.get('id')}"
-        ))
-        if len(row) == 2:
+        image_bytes = generate_tariff_image(
+            tier_name=tier_info["name"],
+            tier_icon=tier_info["icon"],
+            features=processed_features,
+            tariffs=tier_tariffs,
+            currency=currency,
+            currency_symbol=symbol,
+            primary_color=primary_color
+        )
+        
+        # Кнопки выбора длительности
+        keyboard = []
+        row = []
+        for tariff in tier_tariffs:
+            duration = tariff.get("duration_days", 0)
+            name = f"{duration} дн."
+            if len(name) > 15:
+                name = f"{duration}д"
+            
+            row.append(InlineKeyboardButton(
+                name,
+                callback_data=f"tariff_{tariff.get('id')}"
+            ))
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        
+        if row:
             keyboard.append(row)
-            row = []
-    
-    if row:
-        keyboard.append(row)
-    
-    keyboard.append([
-        InlineKeyboardButton("🔙 К выбору типа", callback_data="tariffs")
-    ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # Используем безопасную функцию для редактирования/отправки
-    temp_update = Update(update_id=0, callback_query=query)
-    if has_cards(text):
-        text_clean = clean_markdown_for_cards(text)
-        await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
-    else:
-        # Для текста без карточек используем Markdown
+        
+        keyboard.append([
+            InlineKeyboardButton("🔙 К выбору типа", callback_data="tariffs")
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Отправляем изображение
+        photo_file = BytesIO(image_bytes)
+        photo_file.name = f"tariff_{tier}.png"
+        
+        # Пытаемся удалить старое сообщение
+        try:
+            await query.message.delete()
+        except:
+            pass
+        
+        # Отправляем новое сообщение с изображением
+        await context.bot.send_photo(
+            chat_id=query.message.chat_id,
+            photo=photo_file,
+            caption="Выберите длительность:",
+            reply_markup=reply_markup
+        )
+        
+    except ImportError:
+        # Если модуль не найден, используем текстовую версию (fallback)
+        logger.warning("Image generator module not found, using text version")
+        text = f"{tier_info['icon']} {tier_info['name']}\n"
+        text += "━━━━━━━━━━━━━━━\n"
+        
+        if processed_features:
+            text += "✨ **Включено в тариф:**\n"
+            for feature in processed_features:
+                text += f"{feature['icon']} {feature['name']}\n"
+            if len(features_list) > 5:
+                text += f"... и еще {len(features_list) - 5} функций\n"
+            text += "\n"
+        
+        text += "📅 Выберите длительность:\n\n"
+        
+        for tariff in tier_tariffs:
+            name = tariff.get("name", f"{tariff.get('duration_days', 0)} дней")
+            price = tariff.get(price_field, 0)
+            duration = tariff.get("duration_days", 0)
+            per_day = price / duration if duration > 0 else price
+            text += f"📦 {name} | 💰 {price:.0f} {symbol} | 📊 {per_day:.2f} {symbol}/день | ⏱️ {duration} дней\n"
+        
+        text += "━━━━━━━━━━━━━━━\n"
+        
+        keyboard = []
+        row = []
+        for tariff in tier_tariffs:
+            duration = tariff.get("duration_days", 0)
+            name = f"{duration} дн."
+            if len(name) > 15:
+                name = f"{duration}д"
+            row.append(InlineKeyboardButton(name, callback_data=f"tariff_{tariff.get('id')}"))
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        keyboard.append([InlineKeyboardButton("🔙 К выбору типа", callback_data="tariffs")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        temp_update = Update(update_id=0, callback_query=query)
         try:
             await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
         except Exception as e:
             logger.warning(f"Error in show_tier_tariffs, sending without formatting: {e}")
+            text_clean = clean_markdown_for_cards(text)
+            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
+    except Exception as e:
+        logger.error(f"Error generating tariff image: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # Fallback на текстовую версию при ошибке
+        try:
+            await query.answer("⚠️ Ошибка генерации изображения, используем текстовую версию")
+        except:
+            pass
+        
+        # Отправляем текстовую версию
+        text = f"{tier_info['icon']} {tier_info['name']}\n"
+        text += "━━━━━━━━━━━━━━━\n"
+        
+        if processed_features:
+            text += "✨ **Включено в тариф:**\n"
+            for feature in processed_features:
+                text += f"{feature['icon']} {feature['name']}\n"
+            if len(features_list) > 5:
+                text += f"... и еще {len(features_list) - 5} функций\n"
+            text += "\n"
+        
+        text += "📅 Выберите длительность:\n\n"
+        
+        for tariff in tier_tariffs:
+            name = tariff.get("name", f"{tariff.get('duration_days', 0)} дней")
+            price = tariff.get(price_field, 0)
+            duration = tariff.get("duration_days", 0)
+            per_day = price / duration if duration > 0 else price
+            text += f"📦 {name} | 💰 {price:.0f} {symbol} | 📊 {per_day:.2f} {symbol}/день | ⏱️ {duration} дней\n"
+        
+        text += "━━━━━━━━━━━━━━━\n"
+        
+        keyboard = []
+        row = []
+        for tariff in tier_tariffs:
+            duration = tariff.get("duration_days", 0)
+            name = f"{duration} дн."
+            if len(name) > 15:
+                name = f"{duration}д"
+            row.append(InlineKeyboardButton(name, callback_data=f"tariff_{tariff.get('id')}"))
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        keyboard.append([InlineKeyboardButton("🔙 К выбору типа", callback_data="tariffs")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        temp_update = Update(update_id=0, callback_query=query)
+        try:
+            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+        except Exception as e2:
+            logger.warning(f"Error in show_tier_tariffs fallback, sending without formatting: {e2}")
             text_clean = clean_markdown_for_cards(text)
             await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
 
@@ -3557,10 +3864,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 used_traffic = user_data.get("usedTrafficBytes", 0)
                 traffic_limit = user_data.get("trafficLimitBytes", 0)
                 
+                # Проверяем, есть ли активная подписка (не истекшая)
+                has_active_subscription = False
+                expire_date = None
+                days_left = 0
+                
                 if is_active and expire_at:
                     expire_date = datetime.fromisoformat(expire_at.replace('Z', '+00:00'))
-                    days_left = (expire_date - datetime.now(expire_date.tzinfo)).days
+                    now = datetime.now(expire_date.tzinfo)
+                    delta = expire_date - now
+                    days_left = delta.days
                     
+                    # Подписка активна только если не истекла
+                    has_active_subscription = days_left > 0
+                
+                if has_active_subscription and expire_date:
                     # Статус с индикатором - в одну строку
                     status_icon = "🟢" if days_left > 7 else "🟡" if days_left > 0 else "🔴"
                     welcome_text += f"📊 **{get_text('subscription_status_title', user_lang)}** - {status_icon} {get_text('active', user_lang)}\n"
@@ -3575,7 +3893,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     else:
                         welcome_text += f"📅 {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
                     
-                    # Дни с правильным склонением
+                    # Дни с правильным склонением (days_left уже > 0 здесь)
                     if user_lang == 'ru':
                         if days_left == 1:
                             days_text = f"{days_left} день"
@@ -3621,7 +3939,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     welcome_text += "━━━━━━━━━━━━━━━\n"
                 
                 # Используем build_main_menu_keyboard для правильного порядка кнопок из админки
-                keyboard = build_main_menu_keyboard(user_lang, is_active, subscription_url, expire_at)
+                # Используем has_active_subscription для правильного отображения кнопок
+                keyboard = build_main_menu_keyboard(user_lang, has_active_subscription, subscription_url, expire_at)
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 # Используем безопасную функцию для редактирования/отправки
@@ -4570,6 +4889,9 @@ async def activate_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # Получаем настройки триала для сообщения об успехе
+    trial_settings = get_trial_settings()
+    
     # Проверяем результат активации
     if result and "message" in result:
         message_text = result.get("message", "").lower()
@@ -4578,9 +4900,18 @@ async def activate_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
            "активирован" in message_text or \
            "успешно" in message_text or \
            result.get("success", False):
-            text = f"✅ **{get_text('trial_activated_title', user_lang)}**\n"
+            # Используем сообщение из настроек триала
+            activation_message_key = f'activation_message_{user_lang}'
+            activation_message = trial_settings.get(activation_message_key, '')
+            if not activation_message:
+                activation_message = trial_settings.get('activation_message_ru', '')
+            if not activation_message:
+                # Дефолтное сообщение
+                activation_message = f"✅ Триал активирован! Вам добавлено {trial_settings.get('days', 3)} дней премиум-доступа."
+            
+            # Форматируем сообщение
+            text = f"**{activation_message}**\n"
             text += "━━━━━━━━━━━━━━━\n\n"
-            text += f"{get_text('trial_days_received', user_lang)}\n"
             text += f"{get_text('enjoy_vpn', user_lang)}"
             
             temp_update = Update(update_id=0, callback_query=query)
@@ -4602,10 +4933,21 @@ async def activate_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
     elif result and result.get("success", False):
-        # Если есть поле success = True
-        text = f"✅ **{get_text('trial_activated_title', user_lang)}**\n"
+        # Если есть поле success = True - используем сообщение из API
+        message = result.get("message", "")
+        if message:
+            text = f"**{message}**\n"
+        else:
+            # Используем сообщение из настроек триала
+            activation_message_key = f'activation_message_{user_lang}'
+            activation_message = trial_settings.get(activation_message_key, '')
+            if not activation_message:
+                activation_message = trial_settings.get('activation_message_ru', '')
+            if not activation_message:
+                activation_message = f"✅ Триал активирован! Вам добавлено {trial_settings.get('days', 3)} дней премиум-доступа."
+            text = f"**{activation_message}**\n"
+        
         text += "━━━━━━━━━━━━━━━\n\n"
-        text += f"{get_text('trial_days_received', user_lang)}\n"
         text += f"{get_text('enjoy_vpn', user_lang)}"
         
         temp_update = Update(update_id=0, callback_query=query)

@@ -11,6 +11,7 @@ API эндпоинты администратора
 - GET/POST /api/admin/tariffs - Тарифы
 - GET/POST /api/admin/promo-codes - Промокоды
 - GET/POST /api/admin/referral-settings - Настройки рефералов
+- GET/POST /api/admin/trial-settings - Настройки триала
 - GET/POST /api/admin/tariff-features - Функции тарифов
 - GET/POST /api/admin/currency-rates - Курсы валют
 - POST /api/admin/broadcast - Рассылка
@@ -36,6 +37,7 @@ from modules.models.referral import ReferralSetting
 from modules.models.tariff_feature import TariffFeatureSetting
 from modules.models.currency import CurrencyRate
 from modules.models.auto_broadcast import AutoBroadcastMessage, AutoBroadcastSettings
+from modules.models.trial import TrialSettings
 
 app = get_app()
 db = get_db()
@@ -1540,6 +1542,141 @@ def ref_settings(current_admin):
 
 
 # ============================================================================
+# TRIAL SETTINGS
+# ============================================================================
+
+@app.route('/api/admin/trial-settings', methods=['GET', 'POST'])
+@admin_required
+def admin_trial_settings(current_admin):
+    """Настройки триального периода"""
+    from modules.models.trial import get_trial_settings
+    
+    settings = get_trial_settings()
+    
+    if request.method == 'GET':
+        return jsonify({
+            "days": settings.days,
+            "devices": settings.devices,
+            "traffic_limit_bytes": settings.traffic_limit_bytes,
+            "title_ru": settings.title_ru or "",
+            "title_ua": settings.title_ua or "",
+            "title_en": settings.title_en or "",
+            "title_cn": settings.title_cn or "",
+            "description_ru": settings.description_ru or "",
+            "description_ua": settings.description_ua or "",
+            "description_en": settings.description_en or "",
+            "description_cn": settings.description_cn or "",
+            "button_text_ru": settings.button_text_ru or "",
+            "button_text_ua": settings.button_text_ua or "",
+            "button_text_en": settings.button_text_en or "",
+            "button_text_cn": settings.button_text_cn or "",
+            "activation_message_ru": settings.activation_message_ru or "",
+            "activation_message_ua": settings.activation_message_ua or "",
+            "activation_message_en": settings.activation_message_en or "",
+            "activation_message_cn": settings.activation_message_cn or "",
+            "enabled": settings.enabled
+        }), 200
+    
+    try:
+        data = request.json
+        
+        if 'days' in data:
+            settings.days = int(data.get('days', 3))
+        if 'devices' in data:
+            settings.devices = int(data.get('devices', 3))
+        if 'traffic_limit_bytes' in data:
+            settings.traffic_limit_bytes = int(data.get('traffic_limit_bytes', 0))
+        if 'title_ru' in data:
+            settings.title_ru = data.get('title_ru', '')
+        if 'title_ua' in data:
+            settings.title_ua = data.get('title_ua', '')
+        if 'title_en' in data:
+            settings.title_en = data.get('title_en', '')
+        if 'title_cn' in data:
+            settings.title_cn = data.get('title_cn', '')
+        if 'description_ru' in data:
+            settings.description_ru = data.get('description_ru', '')
+        if 'description_ua' in data:
+            settings.description_ua = data.get('description_ua', '')
+        if 'description_en' in data:
+            settings.description_en = data.get('description_en', '')
+        if 'description_cn' in data:
+            settings.description_cn = data.get('description_cn', '')
+        if 'button_text_ru' in data:
+            settings.button_text_ru = data.get('button_text_ru', '')
+        if 'button_text_ua' in data:
+            settings.button_text_ua = data.get('button_text_ua', '')
+        if 'button_text_en' in data:
+            settings.button_text_en = data.get('button_text_en', '')
+        if 'button_text_cn' in data:
+            settings.button_text_cn = data.get('button_text_cn', '')
+        if 'activation_message_ru' in data:
+            settings.activation_message_ru = data.get('activation_message_ru', '')
+        if 'activation_message_ua' in data:
+            settings.activation_message_ua = data.get('activation_message_ua', '')
+        if 'activation_message_en' in data:
+            settings.activation_message_en = data.get('activation_message_en', '')
+        if 'activation_message_cn' in data:
+            settings.activation_message_cn = data.get('activation_message_cn', '')
+        if 'enabled' in data:
+            settings.enabled = bool(data.get('enabled', True))
+        
+        db.session.add(settings)
+        db.session.commit()
+        
+        # Очищаем кэш (если используется)
+        try:
+            cache.delete('trial_settings')
+        except:
+            pass
+        
+        return jsonify({"message": "Trial settings updated"}), 200
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        print(f"Error updating trial settings: {e}")
+        return jsonify({"message": f"Failed to update trial settings: {str(e)}"}), 500
+
+
+@app.route('/api/public/trial-settings', methods=['GET'])
+def public_trial_settings():
+    """Публичный endpoint для получения настроек триала (для фронтенда)"""
+    from modules.models.trial import get_trial_settings
+    
+    settings = get_trial_settings()
+    
+    # Форматируем текст, заменяя {days} на актуальное значение
+    def format_text(text, days):
+        if not text:
+            return ""
+        return text.replace("{days}", str(days))
+    
+    return jsonify({
+        "days": settings.days,
+        "devices": settings.devices,
+        "traffic_limit_bytes": settings.traffic_limit_bytes,
+        "enabled": settings.enabled,
+        "title_ru": format_text(settings.title_ru, settings.days),
+        "title_ua": format_text(settings.title_ua, settings.days),
+        "title_en": format_text(settings.title_en, settings.days),
+        "title_cn": format_text(settings.title_cn, settings.days),
+        "description_ru": format_text(settings.description_ru, settings.days),
+        "description_ua": format_text(settings.description_ua, settings.days),
+        "description_en": format_text(settings.description_en, settings.days),
+        "description_cn": format_text(settings.description_cn, settings.days),
+        "button_text_ru": format_text(settings.button_text_ru, settings.days),
+        "button_text_ua": format_text(settings.button_text_ua, settings.days),
+        "button_text_en": format_text(settings.button_text_en, settings.days),
+        "button_text_cn": format_text(settings.button_text_cn, settings.days),
+        "activation_message_ru": format_text(settings.activation_message_ru, settings.days),
+        "activation_message_ua": format_text(settings.activation_message_ua, settings.days),
+        "activation_message_en": format_text(settings.activation_message_en, settings.days),
+        "activation_message_cn": format_text(settings.activation_message_cn, settings.days)
+    }), 200
+
+
+# ============================================================================
 # TARIFF FEATURES
 # ============================================================================
 
@@ -2064,11 +2201,33 @@ def handle_promos(current_admin):
 @admin_required
 def delete_promo(current_admin, id):
     """Удаление промокода"""
-    c = db.session.get(PromoCode, id)
-    if c:
+    try:
+        c = db.session.get(PromoCode, id)
+        if not c:
+            return jsonify({"message": "Promo code not found"}), 404
+        
+        # Проверяем, используется ли промокод в платежах
+        payments_count = Payment.query.filter_by(promo_code_id=id).count()
+        
+        if payments_count > 0:
+            # Обнуляем promo_code_id в связанных платежах перед удалением
+            Payment.query.filter_by(promo_code_id=id).update({'promo_code_id': None})
+            db.session.commit()
+        
+        # Удаляем промокод
         db.session.delete(c)
         db.session.commit()
-    return jsonify({"message": "Deleted"}), 200
+        
+        return jsonify({"message": "Deleted"}), 200
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"[PROMOCODE] Error deleting promo code {id}: {e}")
+        print(f"[PROMOCODE] Traceback: {error_trace}")
+        return jsonify({
+            "message": f"Failed to delete promo code: {str(e)}"
+        }), 500
 
 
 @app.route('/api/admin/promocodes/<int:id>', methods=['PATCH'])

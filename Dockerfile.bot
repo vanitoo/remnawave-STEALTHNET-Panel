@@ -3,6 +3,13 @@ FROM python:3.11-slim
 # Устанавливаем рабочую директорию
 WORKDIR /app
 
+# Устанавливаем системные зависимости и шрифты с поддержкой кириллицы
+RUN apt-get update && apt-get install -y \
+    fonts-dejavu \
+    fonts-dejavu-core \
+    fonts-dejavu-extra \
+    && rm -rf /var/lib/apt/lists/*
+
 # Копируем файлы зависимостей
 COPY client_bot_requirements.txt .
 
@@ -12,6 +19,9 @@ RUN pip install --no-cache-dir -r client_bot_requirements.txt
 # Копируем файлы бота
 COPY client_bot.py .
 COPY logo.png .
+# Копируем модуль генерации изображений
+COPY modules/__init__.py ./modules/
+COPY modules/image_generator ./modules/image_generator
 
 # Создаем директорию для логов
 RUN mkdir -p logs

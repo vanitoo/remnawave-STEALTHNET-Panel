@@ -16,6 +16,7 @@ from modules.models.bot_config import BotConfig
 from modules.models.referral import ReferralSetting
 from modules.models.currency import CurrencyRate
 from modules.models.tariff_feature import TariffFeatureSetting
+from modules.models.trial import TrialSettings
 
 __all__ = [
     'User',
@@ -28,5 +29,6 @@ __all__ = [
     'BotConfig',
     'ReferralSetting',
     'CurrencyRate',
-    'TariffFeatureSetting'
+    'TariffFeatureSetting',
+    'TrialSettings'
 ]

@@ -248,6 +248,8 @@ def miniapp_maintenance_status():
 @limiter.limit("10 per minute")
 def miniapp_activate_trial():
     """Активация триала"""
+    from modules.models.trial import get_trial_settings
+    
     try:
         data = request.json or {}
         init_data = data.get('initData', '')
@@ -260,17 +262,39 @@ def miniapp_activate_trial():
         if not user:
             return jsonify({"success": False, "message": "User not registered"}), 404
 
-        new_exp = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+        # Получаем настройки триала из БД
+        trial_settings = get_trial_settings()
+        
+        if not trial_settings.enabled:
+            return jsonify({"success": False, "message": "Trial is currently disabled"}), 400
+        
+        # Используем настройки из БД
+        trial_days = trial_settings.days
+        trial_devices = trial_settings.devices
+        
+        new_exp = (datetime.now(timezone.utc) + timedelta(days=trial_days)).isoformat()
 
         referral_settings = get_referral_settings()
         trial_squad_id = os.getenv("DEFAULT_SQUAD_ID")
         if referral_settings and referral_settings.trial_squad_id:
             trial_squad_id = referral_settings.trial_squad_id
 
+        # Формируем payload для обновления пользователя
+        patch_payload = {
+            "uuid": user.remnawave_uuid,
+            "expireAt": new_exp,
+            "activeInternalSquads": [trial_squad_id],
+            "hwidDeviceLimit": trial_devices
+        }
+        
+        # Если установлен лимит трафика, добавляем его
+        if trial_settings.traffic_limit_bytes > 0:
+            patch_payload["trafficLimitBytes"] = trial_settings.traffic_limit_bytes
+
         resp = requests.patch(
             f"{os.getenv('API_URL')}/api/users",
             headers={"Authorization": f"Bearer {os.getenv('ADMIN_TOKEN')}"},
-            json={"uuid": user.remnawave_uuid, "expireAt": new_exp, "activeInternalSquads": [trial_squad_id], "hwidDeviceLimit": 3},
+            json=patch_payload,
             timeout=10
         )
 
@@ -278,9 +302,21 @@ def miniapp_activate_trial():
             return jsonify({"success": False, "message": "Failed to activate trial"}), 500
 
         cache.delete(f'live_data_{user.remnawave_uuid}')
-        return jsonify({"success": True, "message": "Trial activated! +3 days"}), 200
+        
+        # Форматируем сообщение об успешной активации
+        lang = user.preferred_lang or 'ru'
+        activation_message = getattr(trial_settings, f'activation_message_{lang}', None)
+        if not activation_message:
+            activation_message = trial_settings.activation_message_ru or f"Trial activated! +{trial_days} days"
+        
+        # Заменяем {days} на актуальное значение
+        message = activation_message.replace("{days}", str(trial_days))
+        
+        return jsonify({"success": True, "message": message}), 200
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "message": "Internal error"}), 500
 
 

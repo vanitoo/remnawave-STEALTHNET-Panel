@@ -48,6 +48,7 @@ from modules.models.currency import CurrencyRate
 from modules.models.tariff_feature import TariffFeatureSetting
 from modules.models.auto_broadcast import AutoBroadcastMessage, AutoBroadcastSettings
 from modules.models.casino import CasinoGame, CasinoStats
+from modules.models.trial import TrialSettings
 
 # ============================================================================
 # ИМПОРТ API МАРШРУТОВ
@@ -495,6 +496,39 @@ if __name__ == '__main__':
         
         # Создаем таблицы в базе данных
         db.create_all()
+        
+        # Создаем настройки триала если их нет
+        try:
+            trial_settings = TrialSettings.query.first()
+            if not trial_settings:
+                app.logger.info("📋 Создание настроек триала по умолчанию...")
+                default_settings = TrialSettings(
+                    days=3,
+                    devices=3,
+                    traffic_limit_bytes=0,
+                    enabled=True,
+                    title_ru='Получите {days} дней премиум',
+                    title_ua='Отримайте {days} днів преміум',
+                    title_en='Get {days} Days Premium',
+                    title_cn='获得 {days} 天高级版',
+                    description_ru='Дадим полный доступ без ограничений — протестируйте сеть перед оплатой.',
+                    description_ua='Дамо повний доступ без обмежень — протестуйте мережу перед оплатою.',
+                    description_en='We\'ll give you full access without restrictions — test the network before payment.',
+                    description_cn='我们将为您提供无限制的完全访问权限 — 在付款前测试网络。',
+                    button_text_ru='🎁 Попробовать бесплатно ({days} дня)',
+                    button_text_ua='🎁 Спробувати безкоштовно ({days} дні)',
+                    button_text_en='🎁 Try Free ({days} Days)',
+                    button_text_cn='🎁 免费试用 ({days} 天)',
+                    activation_message_ru='✅ Триал активирован! Вам добавлено {days} дней премиум-доступа.',
+                    activation_message_ua='✅ Тріал активовано! Вам додано {days} днів преміум-доступу.',
+                    activation_message_en='✅ Trial activated! You have been added {days} days of premium access.',
+                    activation_message_cn='✅ 试用已激活！您已获得 {days} 天的高级访问权限。'
+                )
+                db.session.add(default_settings)
+                db.session.commit()
+                app.logger.info("✅ Настройки триала созданы")
+        except Exception as e:
+            app.logger.warning(f"⚠️  Ошибка при создании настроек триала: {e}")
         
         # Создаем дефолтные сообщения автоматических рассылок если их нет
         try:

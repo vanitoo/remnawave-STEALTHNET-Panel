@@ -40,6 +40,9 @@ def run_all_schema_migrations(app=None):
         ('add_squad_id_to_promo_code.py', 'add_squad_id_to_promo_code'),
         ('add_is_admin_to_ticket_message.py', 'add_is_admin_to_ticket_message'),
         ('add_telegram_message_id_to_payment.py', 'add_telegram_message_id_to_payment'),
+        ('add_button_fields_to_auto_broadcast.py', 'add_button_fields_to_auto_broadcast'),  # Поля кнопок для авторассылки
+        ('add_casino_tables.py', 'add_casino_tables'),  # Таблицы казино
+        ('migration/migrate_add_trial_settings.py', 'migrate_add_trial_settings'),  # Настройки триала
     ]
     
     success_count = 0
@@ -78,7 +81,13 @@ def run_all_schema_migrations(app=None):
                 module = importlib.util.module_from_spec(spec)
                 
                 # Для скриптов, которые используют app из app.py
-                if script_file == 'add_yookassa_receipt_field.py':
+                # Это нужно для add_yookassa_receipt_field.py и миграций из папки migration/
+                needs_app_substitution = (
+                    script_file == 'add_yookassa_receipt_field.py' or 
+                    'migration/' in script_file
+                )
+                
+                if needs_app_substitution:
                     # Этот скрипт импортирует app из app.py, нужно подменить
                     try:
                         import app as app_module
@@ -92,7 +101,7 @@ def run_all_schema_migrations(app=None):
                 spec.loader.exec_module(module)
                 
                 # Восстанавливаем оригинальный app
-                if script_file == 'add_yookassa_receipt_field.py':
+                if needs_app_substitution:
                     try:
                         import app as app_module
                         if hasattr(app_module, 'app') and 'original_app' in locals():
@@ -105,6 +114,7 @@ def run_all_schema_migrations(app=None):
                 # Пробуем несколько вариантов имени функции
                 script_base_name = script_name.replace('.py', '')
                 possible_func_names = [
+                    'migrate',  # Стандартное имя функции для миграций в папке migration/
                     script_base_name,  # add_branding_fields
                     script_base_name.replace('_', ''),  # addbrandingfields
                     script_base_name.replace('_', '_'),  # add_branding_fields (то же самое)
