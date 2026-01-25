@@ -121,6 +121,7 @@ issue_cert() {
   local domains=("$@")
 
   local certbot_args=(
+    certbot
     certonly
     --standalone
     --preferred-challenges http
