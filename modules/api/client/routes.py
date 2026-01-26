@@ -304,24 +304,33 @@ def _normalize_traffic_data(data_dict):
     if not isinstance(data_dict, dict):
         return {}
     
+    # Получаем userTraffic один раз для всех полей трафика
+    user_traffic = data_dict.get('userTraffic', {})
+    if not isinstance(user_traffic, dict):
+        user_traffic = {}
+    
     # Нормализуем трафик: в RemnaWave usedTraffic обычно лежит в userTraffic.usedTrafficBytes
     used_traffic = data_dict.get('usedTrafficBytes', None)
     if used_traffic is None:
-        ut = data_dict.get('userTraffic', {})
-        if isinstance(ut, dict):
-            used_traffic = ut.get('usedTrafficBytes', 0)
-        else:
-            used_traffic = 0
+        used_traffic = user_traffic.get('usedTrafficBytes', 0)
     else:
         used_traffic = used_traffic or 0
     
     traffic_limit = data_dict.get('trafficLimitBytes', 0) or 0
     traffic_strategy = data_dict.get('trafficLimitStrategy')
     
+    # Нормализуем lifetimeUsedTrafficBytes (общий использованный трафик за всё время)
+    lifetime_used_traffic = data_dict.get('lifetimeUsedTrafficBytes', None)
+    if lifetime_used_traffic is None:
+        lifetime_used_traffic = user_traffic.get('lifetimeUsedTrafficBytes', 0)
+    else:
+        lifetime_used_traffic = lifetime_used_traffic or 0
+    
     return {
         'usedTrafficBytes': used_traffic,
         'trafficLimitBytes': traffic_limit,
         'trafficLimitStrategy': traffic_strategy,
+        'lifetimeUsedTrafficBytes': lifetime_used_traffic,
         # Для обратной совместимости
         'traffic_used': used_traffic,
         'traffic_limit': traffic_limit
