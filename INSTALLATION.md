@@ -338,7 +338,6 @@ cd /opt/remnawave-STEALTHNET-Panel
 docker compose down
 git pull
 docker compose build --no-cache
-docker compose run --rm api python3 migration/migrate_all.py
 docker compose up -d
 ```
 
@@ -384,6 +383,7 @@ curl -X POST "https://api.telegram.org/botYOUR_BOT_TOKEN/setWebhook" \
 ---
 
 # Готово! StealthNET Admin Panel установлена и готова к работе.
+
 
 
 
