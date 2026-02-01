@@ -20,6 +20,7 @@ from modules.models.tariff_level import TariffLevel
 from modules.models.option import PurchaseOption
 from modules.models.trial import TrialSettings
 from modules.models.user_config import UserConfig
+from modules.models.config_share import ConfigShareToken
 
 __all__ = [
     'User',
@@ -36,5 +37,6 @@ __all__ = [
     'TariffLevel',
     'PurchaseOption',
     'TrialSettings',
-    'UserConfig'
+    'UserConfig',
+    'ConfigShareToken'
 ]

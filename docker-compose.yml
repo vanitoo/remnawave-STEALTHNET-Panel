@@ -70,6 +70,10 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - CACHE_TYPE=redis
+      - FREEEKASSA_API_KEY=${FREEEKASSA_API_KEY:-}
+      - FREEEKASSA_SHOP_ID=${FREEEKASSA_SHOP_ID:-}
+      - FREEEKASSA_WEBHOOK_SECRET=${FREEEKASSA_WEBHOOK_SECRET:-}
+      - FREEEKASSA_SECRET1=${FREEEKASSA_SECRET1:-}
     networks:
       - stealthnet-network
     depends_on:

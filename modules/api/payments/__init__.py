@@ -20,6 +20,7 @@ from modules.api.payments.yookassa import create_yookassa_payment
 from modules.api.payments.yoomoney import create_yoomoney_payment
 from modules.api.payments.telegram_stars import create_telegram_stars_payment
 from modules.api.payments.freekassa import create_freekassa_payment
+from modules.api.payments.kassa_ai import create_kassa_ai_payment
 from modules.api.payments.robokassa import create_robokassa_payment
 from modules.api.payments.cryptobot import create_cryptobot_payment
 from modules.api.payments.monobank import create_monobank_payment
@@ -34,6 +35,7 @@ PAYMENT_PROVIDERS = {
     'yoomoney': create_yoomoney_payment,
     'telegram_stars': create_telegram_stars_payment,
     'freekassa': create_freekassa_payment,
+    'kassa_ai': create_kassa_ai_payment,
     'robokassa': create_robokassa_payment,
     'cryptobot': create_cryptobot_payment,
     'monobank': create_monobank_payment,

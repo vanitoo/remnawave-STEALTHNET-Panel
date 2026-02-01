@@ -13,11 +13,16 @@ import json
 import time
 import re
 import math
+import hashlib
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, 
+    KeyboardButton, ReplyKeyboardMarkup, InlineQueryResultArticle, 
+    InputTextMessageContent
+)
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
@@ -25,6 +30,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     MessageHandler,
     PreCheckoutQueryHandler,
+    InlineQueryHandler,
     ContextTypes,
     filters
 )
@@ -57,6 +63,12 @@ FLASK_API_URL = os.getenv("FLASK_API_URL", "http://localhost:5000")  # URL Flask
 YOUR_SERVER_IP = os.getenv("YOUR_SERVER_IP", "https://panel.stealthnet.app")  # URL сервера (панель)
 MINIAPP_URL = os.getenv("MINIAPP_URL", YOUR_SERVER_IP)  # URL для miniapp
 SERVICE_NAME = os.getenv("SERVICE_NAME", "StealthNET")  # Название сервиса (можно менять через env)
+
+# Webhook (опционально): если BOT_USE_WEBHOOK=true, бот принимает обновления по HTTPS вместо polling
+BOT_USE_WEBHOOK = os.getenv("BOT_USE_WEBHOOK", "").strip().lower() in ("1", "true", "yes")
+BOT_WEBHOOK_BASE_URL = os.getenv("BOT_WEBHOOK_BASE_URL", "").strip().rstrip("/")  # например https://yourdomain.com
+BOT_WEBHOOK_PATH = os.getenv("BOT_WEBHOOK_PATH", "webhook/client-bot").strip().lstrip("/")  # путь без ведущего /
+BOT_WEBHOOK_PORT = int(os.getenv("BOT_WEBHOOK_PORT", "8443"))
 
 # Путь к логотипу
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "logo.png")
@@ -509,7 +521,7 @@ def format_info_line(label: str, value: str, icon: str = "") -> str:
     return f"{label}: {value}\n"
 
 
-async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mode=None):
+async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mode=None, context: ContextTypes.DEFAULT_TYPE = None):
     """
     Отправляет сообщение с логотипом сверху.
     Всегда отправляет логотип с текстом в одном сообщении (фото с caption).
@@ -526,13 +538,27 @@ async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mo
         if len(text) > 1024:
             text = text[:1021] + "..."
         
+        # Получаем context из update, если не передан
+        if context is None:
+            # Пытаемся получить context из update (если доступен)
+            context = getattr(update, '_context', None)
+        
         # Проверяем существование файла логотипа
         if not os.path.exists(LOGO_PATH):
             logger.warning(f"Логотип не найден: {LOGO_PATH}, отправляем без логотипа")
+            sent_message = None
             if update.message:
-                await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+                sent_message = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
             elif update.callback_query and update.callback_query.message:
-                await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+                sent_message = await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+            # Сохраняем message_id
+            if sent_message and sent_message.message_id and context:
+                user_data = context.user_data if hasattr(context, 'user_data') else {}
+                if 'bot_message_ids' not in user_data:
+                    user_data['bot_message_ids'] = []
+                user_data['bot_message_ids'].append(sent_message.message_id)
+                if len(user_data['bot_message_ids']) > 20:
+                    user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
             return
         
         # Определяем сообщение для ответа
@@ -543,12 +569,21 @@ async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mo
         
         # Всегда отправляем фото с caption в одном сообщении
         with open(LOGO_PATH, 'rb') as logo_file:
-            await message.reply_photo(
+            sent_message = await message.reply_photo(
                 photo=logo_file,
                 caption=text,
                 reply_markup=reply_markup,
                 parse_mode=parse_mode
             )
+            # Сохраняем message_id для последующего удаления
+            if sent_message and sent_message.message_id and context:
+                user_data = context.user_data if hasattr(context, 'user_data') else {}
+                if 'bot_message_ids' not in user_data:
+                    user_data['bot_message_ids'] = []
+                user_data['bot_message_ids'].append(sent_message.message_id)
+                # Ограничиваем список последними 20 сообщениями
+                if len(user_data['bot_message_ids']) > 20:
+                    user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
     except Exception as e:
         logger.error(f"Ошибка при отправке сообщения с логотипом: {e}")
         # Если упали на парсинге Markdown/HTML — пробуем отправить БЕЗ parse_mode
@@ -560,28 +595,53 @@ async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mo
                     message = update.message if update.message else (update.callback_query.message if update.callback_query else None)
                     if message:
                         with open(LOGO_PATH, 'rb') as logo_file:
-                            await message.reply_photo(
+                            sent_message = await message.reply_photo(
                                 photo=logo_file,
                                 caption=fallback_text,
                                 reply_markup=reply_markup
                             )
+                            # Сохраняем message_id
+                            if sent_message and sent_message.message_id and context:
+                                user_data = context.user_data if hasattr(context, 'user_data') else {}
+                                if 'bot_message_ids' not in user_data:
+                                    user_data['bot_message_ids'] = []
+                                user_data['bot_message_ids'].append(sent_message.message_id)
+                                if len(user_data['bot_message_ids']) > 20:
+                                    user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
                             return
                 # 2) если фото не вышло — обычный текст без parse_mode
+                sent_message = None
                 if update.message:
-                    await update.message.reply_text(fallback_text, reply_markup=reply_markup)
-                    return
+                    sent_message = await update.message.reply_text(fallback_text, reply_markup=reply_markup)
                 elif update.callback_query and update.callback_query.message:
-                    await update.callback_query.message.reply_text(fallback_text, reply_markup=reply_markup)
-                    return
+                    sent_message = await update.callback_query.message.reply_text(fallback_text, reply_markup=reply_markup)
+                # Сохраняем message_id
+                if sent_message and sent_message.message_id and context:
+                    user_data = context.user_data if hasattr(context, 'user_data') else {}
+                    if 'bot_message_ids' not in user_data:
+                        user_data['bot_message_ids'] = []
+                    user_data['bot_message_ids'].append(sent_message.message_id)
+                    if len(user_data['bot_message_ids']) > 20:
+                        user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                return
             except Exception as e_fallback:
                 logger.error(f"Fallback send without parse_mode failed: {e_fallback}")
 
         # В случае любой другой ошибки отправляем обычное сообщение (как есть)
         try:
+            sent_message = None
             if update.message:
-                await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+                sent_message = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
             elif update.callback_query and update.callback_query.message:
-                await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+                sent_message = await update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+            # Сохраняем message_id
+            if sent_message and sent_message.message_id and context:
+                user_data = context.user_data if hasattr(context, 'user_data') else {}
+                if 'bot_message_ids' not in user_data:
+                    user_data['bot_message_ids'] = []
+                user_data['bot_message_ids'].append(sent_message.message_id)
+                if len(user_data['bot_message_ids']) > 20:
+                    user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
         except Exception as e2:
             logger.error(f"Ошибка при отправке обычного сообщения: {e2}")
 
@@ -619,12 +679,12 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
     text = normalize_ui_text(text)
     if not query:
         # Если нет callback_query, просто отправляем новое сообщение
-        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode=parse_mode)
+        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode=parse_mode, context=context)
         return
     
     message = query.message
     if not message:
-        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode=parse_mode)
+        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode=parse_mode, context=context)
         return
     
     # Обрезаем текст до 1024 символов для caption
@@ -634,48 +694,173 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
     has_photo = message.photo is not None and len(message.photo) > 0
     has_text = message.text is not None
     
-    # Если у нас есть логотип и мы хотим его показать, удаляем старое сообщение (даже если это фото)
-    # и отправляем новое с логотипом. Это нужно, чтобы вернуться от изображения тарифа к логотипу.
+    # Если у нас есть логотип и текущее сообщение тоже с фото
     if has_photo and os.path.exists(LOGO_PATH):
-        # Удаляем старое сообщение с изображением (например, изображение тарифа)
-        try:
-            await message.delete()
-        except Exception as e:
-            logger.debug(f"Could not delete old photo message: {e}")
+        # Проверяем, является ли текущее фото логотипом
+        # Если caption содержит определенные ключевые слова, это может быть изображение тарифа
+        current_caption = message.caption or ""
         
-        # Отправляем новое сообщение с логотипом
-        try:
-            with open(LOGO_PATH, 'rb') as logo_file:
-                return await context.bot.send_photo(
-                    chat_id=message.chat.id,
-                    photo=logo_file,
+        # Определяем, является ли это изображением тарифа
+        # Логотип обычно имеет caption с "Тарифные планы" или другими длинными текстами меню
+        # Изображение тарифа обычно имеет короткий caption "Выберите длительность:"
+        # Если caption не содержит признаков логотипа, считаем это изображением тарифа
+        is_logo = "Тарифные планы" in current_caption or len(current_caption) > 30
+        is_tariff_image = not is_logo and (
+            "Выберите длительность" in current_caption or
+            len(current_caption) < 25
+        )
+        
+        # Если это изображение тарифа, всегда удаляем и отправляем новое с логотипом
+        # Это гарантирует замену изображения тарифа на логотип при возврате назад
+        if is_tariff_image:
+            # Это изображение тарифа или неизвестное фото - удаляем и отправляем новое с логотипом
+            logger.debug(f"Detected tariff image or unknown photo, replacing with logo")
+            try:
+                await message.delete()
+            except Exception as del_err:
+                logger.debug(f"Could not delete old photo message: {del_err}")
+            
+            # Отправляем новое сообщение с логотипом
+            try:
+                with open(LOGO_PATH, 'rb') as logo_file:
+                    sent_message = await context.bot.send_photo(
+                        chat_id=message.chat.id,
+                        photo=logo_file,
+                        caption=display_text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode
+                    )
+                    # Сохраняем message_id
+                    if sent_message and sent_message.message_id:
+                        user_data = context.user_data if hasattr(context, 'user_data') else {}
+                        if 'bot_message_ids' not in user_data:
+                            user_data['bot_message_ids'] = []
+                        user_data['bot_message_ids'].append(sent_message.message_id)
+                        if len(user_data['bot_message_ids']) > 20:
+                            user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                    return sent_message
+            except Exception as e2:
+                logger.warning(f"Error sending photo with logo: {e2}")
+                # Fallback: отправляем без форматирования
+                try:
+                    with open(LOGO_PATH, 'rb') as logo_file:
+                        sent_message = await context.bot.send_photo(
+                            chat_id=message.chat.id,
+                            photo=logo_file,
+                            caption=clean_markdown_for_cards(display_text),
+                            reply_markup=reply_markup
+                        )
+                        # Сохраняем message_id
+                        if sent_message and sent_message.message_id:
+                            user_data = context.user_data if hasattr(context, 'user_data') else {}
+                            if 'bot_message_ids' not in user_data:
+                                user_data['bot_message_ids'] = []
+                            user_data['bot_message_ids'].append(sent_message.message_id)
+                            if len(user_data['bot_message_ids']) > 20:
+                                user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                        return sent_message
+                except Exception as e3:
+                    logger.error(f"Failed to send photo: {e3}")
+        else:
+            # Похоже на логотип - пытаемся отредактировать caption
+            try:
+                await query.edit_message_caption(
                     caption=display_text,
                     reply_markup=reply_markup,
                     parse_mode=parse_mode
                 )
-        except Exception as e2:
-            logger.warning(f"Error sending photo with logo: {e2}")
-            # Fallback: отправляем без форматирования
-            try:
-                with open(LOGO_PATH, 'rb') as logo_file:
-                    return await context.bot.send_photo(
-                        chat_id=message.chat.id,
-                        photo=logo_file,
-                        caption=clean_markdown_for_cards(display_text),
-                        reply_markup=reply_markup
-                    )
-            except Exception as e3:
-                logger.error(f"Failed to send photo: {e3}")
+                # Сохраняем message_id отредактированного сообщения
+                if query.message and query.message.message_id:
+                    user_data = context.user_data if hasattr(context, 'user_data') else {}
+                    if 'bot_message_ids' not in user_data:
+                        user_data['bot_message_ids'] = []
+                    if query.message.message_id not in user_data['bot_message_ids']:
+                        user_data['bot_message_ids'].append(query.message.message_id)
+                        if len(user_data['bot_message_ids']) > 20:
+                            user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                return
+            except Exception as e:
+                error_str = str(e).lower()
+                # Если ошибка парсинга Markdown, пробуем без форматирования
+                if "markdown" in error_str or "parse" in error_str or "can't parse" in error_str:
+                    try:
+                        await query.edit_message_caption(
+                            caption=clean_markdown_for_cards(display_text),
+                            reply_markup=reply_markup
+                        )
+                        return
+                    except Exception as e2:
+                        logger.debug(f"Failed to edit caption without formatting: {e2}")
+                # Если сообщение не изменилось (тот же текст)
+                elif "message is not modified" in error_str:
+                    return  # Просто игнорируем, всё ок
+                # Если не удалось отредактировать, удаляем и отправляем новое
+                logger.debug(f"Could not edit photo caption, deleting and sending new with logo: {e}")
+                try:
+                    await message.delete()
+                except Exception as del_err:
+                    logger.debug(f"Could not delete old photo message: {del_err}")
+                
+                # Отправляем новое сообщение с логотипом
+                try:
+                    with open(LOGO_PATH, 'rb') as logo_file:
+                        sent_message = await context.bot.send_photo(
+                            chat_id=message.chat.id,
+                            photo=logo_file,
+                            caption=display_text,
+                            reply_markup=reply_markup,
+                            parse_mode=parse_mode
+                        )
+                        # Сохраняем message_id
+                        if sent_message and sent_message.message_id:
+                            user_data = context.user_data if hasattr(context, 'user_data') else {}
+                            if 'bot_message_ids' not in user_data:
+                                user_data['bot_message_ids'] = []
+                            user_data['bot_message_ids'].append(sent_message.message_id)
+                            if len(user_data['bot_message_ids']) > 20:
+                                user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                        return sent_message
+                except Exception as e2:
+                    logger.warning(f"Error sending photo with logo: {e2}")
+                    # Fallback: отправляем без форматирования
+                    try:
+                        with open(LOGO_PATH, 'rb') as logo_file:
+                            sent_message = await context.bot.send_photo(
+                                chat_id=message.chat.id,
+                                photo=logo_file,
+                                caption=clean_markdown_for_cards(display_text),
+                                reply_markup=reply_markup
+                            )
+                            # Сохраняем message_id
+                            if sent_message and sent_message.message_id:
+                                user_data = context.user_data if hasattr(context, 'user_data') else {}
+                                if 'bot_message_ids' not in user_data:
+                                    user_data['bot_message_ids'] = []
+                                user_data['bot_message_ids'].append(sent_message.message_id)
+                                if len(user_data['bot_message_ids']) > 20:
+                                    user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                            return sent_message
+                    except Exception as e3:
+                        logger.error(f"Failed to send photo: {e3}")
     
     # Если нет логотипа, пробуем отредактировать caption (если это фото)
     elif has_photo:
         try:
-            await query.edit_message_caption(
-                caption=display_text,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode
-            )
-            return
+                await query.edit_message_caption(
+                    caption=display_text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+                # Сохраняем message_id отредактированного сообщения
+                if query.message and query.message.message_id:
+                    user_data = context.user_data if hasattr(context, 'user_data') else {}
+                    if 'bot_message_ids' not in user_data:
+                        user_data['bot_message_ids'] = []
+                    if query.message.message_id not in user_data['bot_message_ids']:
+                        user_data['bot_message_ids'].append(query.message.message_id)
+                        if len(user_data['bot_message_ids']) > 20:
+                            user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                return
         except Exception as e:
             error_str = str(e).lower()
             # Если ошибка парсинга Markdown, пробуем без форматирования
@@ -707,24 +892,42 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
             # Отправляем новое сообщение с логотипом
             try:
                 with open(LOGO_PATH, 'rb') as logo_file:
-                    return await context.bot.send_photo(
+                    sent_message = await context.bot.send_photo(
                         chat_id=message.chat.id,
                         photo=logo_file,
                         caption=display_text,
                         reply_markup=reply_markup,
                         parse_mode=parse_mode
                     )
+                    # Сохраняем message_id
+                    if sent_message and sent_message.message_id:
+                        user_data = context.user_data if hasattr(context, 'user_data') else {}
+                        if 'bot_message_ids' not in user_data:
+                            user_data['bot_message_ids'] = []
+                        user_data['bot_message_ids'].append(sent_message.message_id)
+                        if len(user_data['bot_message_ids']) > 20:
+                            user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                    return sent_message
             except Exception as e2:
                 logger.warning(f"Error sending photo with logo: {e2}")
                 # Fallback: отправляем без форматирования
                 try:
                     with open(LOGO_PATH, 'rb') as logo_file:
-                        return await context.bot.send_photo(
+                        sent_message = await context.bot.send_photo(
                             chat_id=message.chat.id,
                             photo=logo_file,
                             caption=clean_markdown_for_cards(display_text),
                             reply_markup=reply_markup
                         )
+                        # Сохраняем message_id
+                        if sent_message and sent_message.message_id:
+                            user_data = context.user_data if hasattr(context, 'user_data') else {}
+                            if 'bot_message_ids' not in user_data:
+                                user_data['bot_message_ids'] = []
+                            user_data['bot_message_ids'].append(sent_message.message_id)
+                            if len(user_data['bot_message_ids']) > 20:
+                                user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                        return sent_message
                 except Exception as e3:
                     logger.error(f"Failed to send photo: {e3}")
         
@@ -735,6 +938,15 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
                 reply_markup=reply_markup,
                 parse_mode=parse_mode
             )
+            # Сохраняем message_id отредактированного сообщения
+            if query.message and query.message.message_id:
+                user_data = context.user_data if hasattr(context, 'user_data') else {}
+                if 'bot_message_ids' not in user_data:
+                    user_data['bot_message_ids'] = []
+                if query.message.message_id not in user_data['bot_message_ids']:
+                    user_data['bot_message_ids'].append(query.message.message_id)
+                    if len(user_data['bot_message_ids']) > 20:
+                        user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
             return query.message  # Возвращаем сообщение для получения message_id
         except Exception as e:
             error_str = str(e).lower()
@@ -772,12 +984,21 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
                     parse_mode=parse_mode
                 )
         else:
-            await context.bot.send_message(
-                chat_id=message.chat.id,
-                text=display_text,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode
-            )
+                sent_message = await context.bot.send_message(
+                    chat_id=message.chat.id,
+                    text=display_text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+                # Сохраняем message_id
+                if sent_message and sent_message.message_id:
+                    user_data = context.user_data if hasattr(context, 'user_data') else {}
+                    if 'bot_message_ids' not in user_data:
+                        user_data['bot_message_ids'] = []
+                    user_data['bot_message_ids'].append(sent_message.message_id)
+                    if len(user_data['bot_message_ids']) > 20:
+                        user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                return sent_message
     except Exception as e2:
         # Если ошибка с Markdown, отправляем без форматирования
         logger.warning(f"Error sending message with logo: {e2}")
@@ -1459,7 +1680,7 @@ TRANSLATIONS = {
         'status_button': 'Моя подписка',
         'tariffs_button': 'Тарифы',
         'options_button': 'Опции',
-        'configs_button': 'Конфиги',
+        'configs_button': 'Подписки',
         'servers_button': 'Серверы',
         'referrals_button': 'Рефералка',
         'support_button': 'Поддержка',
@@ -1475,6 +1696,10 @@ TRANSLATIONS = {
         'offer_title': '📋 Публичная оферта',
         'refund_policy_title': '💰 Политика возврата',
         'subscription_link': 'Ссылка подключения',
+        'your_id': 'ID',
+        'devices_available': 'доступно',
+        'devices_unlimited': 'Безлимит',
+        'copy_link': '📋 Копировать ссылку',
         'traffic_usage': 'Использование трафика',
         'unlimited_traffic_full': 'Безлимитный трафик',
         'use_login_password': 'Используйте этот логин и пароль для входа на сайте',
@@ -1680,7 +1905,7 @@ TRANSLATIONS = {
         'status_button': 'Моя підписка',
         'tariffs_button': 'Тарифи',
         'options_button': 'Опції',
-        'configs_button': 'Конфіги',
+        'configs_button': 'Підписки',
         'servers_button': 'Сервери',
         'referrals_button': 'Рефералка',
         'support_button': 'Підтримка',
@@ -1696,6 +1921,10 @@ TRANSLATIONS = {
         'offer_title': '📋 Публічна оферта',
         'refund_policy_title': '💰 Політика повернення',
         'subscription_link': 'Посилання підключення',
+        'your_id': 'ID',
+        'devices_available': 'доступно',
+        'devices_unlimited': 'Безліміт',
+        'copy_link': '📋 Копіювати посилання',
         'traffic_usage': 'Використання трафіку',
         'unlimited_traffic_full': 'Безлімітний трафік',
         'use_login_password': 'Використовуйте цей логін і пароль для входу на сайті',
@@ -1916,6 +2145,10 @@ TRANSLATIONS = {
         'offer_title': '📋 Public Offer',
         'refund_policy_title': '💰 Refund Policy',
         'subscription_link': 'Connection Link',
+        'your_id': 'ID',
+        'devices_available': 'available',
+        'devices_unlimited': 'Unlimited',
+        'copy_link': '📋 Copy link',
         'traffic_usage': 'Traffic Usage',
         'unlimited_traffic_full': 'Unlimited Traffic',
         'use_login_password': 'Use this login and password to access the website',
@@ -2136,6 +2369,10 @@ TRANSLATIONS = {
         'offer_title': '📋 公开要约',
         'refund_policy_title': '💰 退款政策',
         'subscription_link': '连接链接',
+        'your_id': 'ID',
+        'devices_available': '可用',
+        'devices_unlimited': '无限',
+        'copy_link': '📋 复制链接',
         'traffic_usage': '流量使用',
         'unlimited_traffic_full': '无限流量',
         'use_login_password': '使用此登录名和密码访问网站',
@@ -2385,6 +2622,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
     telegram_id = user.id
+    chat_id = update.effective_chat.id
+    
+    # Удаляем старые сообщения перед отправкой нового
+    await delete_recent_bot_messages(context, chat_id, context.user_data, max_messages=20)
     
     # Получаем токен для пользователя
     token = get_user_token(telegram_id)
@@ -2403,7 +2644,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode="Markdown")
+        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode="Markdown", context=context)
         return
     
     if not token or not isinstance(token, str):
@@ -2440,7 +2681,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not token or not isinstance(token, str):
             # Если что-то пошло не так — показываем сообщение об ошибке
-            await reply_with_logo(update, f"❌ {get_text('auth_error', 'ru')}")
+            await reply_with_logo(update, f"❌ {get_text('auth_error', 'ru')}", context=context)
             return
     
     # Получаем данные пользователя (с авто-refresh токена)
@@ -2448,7 +2689,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not user_data:
         lang = get_user_lang(None, context, token)
-        await reply_with_logo(update, f"❌ {get_text('failed_to_load_user', lang)}")
+        await reply_with_logo(update, f"❌ {get_text('failed_to_load_user', lang)}", context=context)
         return
     
     # Получаем язык пользователя
@@ -2478,7 +2719,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ВАЖНО: /start всегда должен показывать главное меню (баланс/статус/трафик),
     # чтобы кастомные тексты (например, из рассылок) не подменяли основной экран.
     welcome_text = f"🛡 **{get_text('stealthnet_bot', user_lang)}**\n"
-    welcome_text += f"👋 {get_text('welcome_user', user_lang)}, {user.first_name}!\n"
+    welcome_text += f"👋 {get_text('main_menu_button', user_lang)}\n"
+    welcome_text += f" {get_text('your_id', user_lang)}: {telegram_id}\n"
     welcome_text += "━━━━━━━━━━━━━━━\n"
     
     # Баланс
@@ -2527,6 +2769,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             days_text = get_days_text(days_left, user_lang)
             welcome_text += f"⏰ {days_text}\n"
         
+        # Устройства (доступное количество из тарифа)
+        hwid_limit = user_data.get("hwidDeviceLimit")
+        if hwid_limit is not None:
+            if hwid_limit == -1 or hwid_limit >= 100:
+                welcome_text += f"📱 **Устройств:** {get_text('devices_unlimited', user_lang)}\n"
+            else:
+                welcome_text += f"📱 **Устройств:** {hwid_limit} {get_text('devices_available', user_lang)}\n"
+        
         # Трафик - в одну строку
         if traffic_limit == 0:
             welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
@@ -2541,6 +2791,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
             
             welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
+        
+        # Ссылка подключения (своя для каждого пользователя)
+        if subscription_url:
+            welcome_text += f"🔗 **{get_text('subscription_link', user_lang)}:**\n"
+            welcome_text += f"`{subscription_url}`\n"
         
         welcome_text += "━━━━━━━━━━━━━━━\n"
     else:
@@ -2562,7 +2817,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_with_logo(
             update,
             welcome_text_clean,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            context=context
         )
     else:
         # Для текста без карточек используем Markdown
@@ -2571,14 +2827,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update,
                 welcome_text,
                 reply_markup=reply_markup,
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                context=context
             )
         except Exception as e:
             logger.warning(f"Markdown parsing error, sending without formatting: {e}")
             await reply_with_logo(
                 update,
                 clean_markdown_for_cards(welcome_text),
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                context=context
             )
 
 
@@ -2628,11 +2886,12 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     preferred_currency = user_data.get("preferred_currency", "uah")
     currency_symbol = {"uah": "₴", "rub": "₽", "usd": "$"}.get(preferred_currency, "₴")
     
-    status_text = f"📊 **{get_text('subscription_status_title', user_lang)}**\n"
-    status_text += "━━━━━━━━━━━━━━━\n\n"
+    status_text = f"📊 {get_text('subscription_status_title', user_lang)}\n"
+    status_text += f" ID: {telegram_id}\n"
+    status_text += "--------------------------------\n"
     
     # Баланс
-    status_text += f"💰 **Баланс:** {balance:.2f} {currency_symbol}\n\n"
+    status_text += f"💰 {get_text('balance', user_lang)}: {balance:.2f} {currency_symbol}\n"
     
     # Проверяем, есть ли активная подписка (не истекшая)
     has_active_subscription = False
@@ -2650,40 +2909,82 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         has_active_subscription = seconds_left > 0
     
     if has_active_subscription and expire_date:
-        # Статус - современный дизайн
+        # Статус подписки
         status_icon = "🟢" if days_left > 7 else "🟡" if days_left > 0 else "🔴"
-        status_text += f"{status_icon} **{get_text('active', user_lang)}**\n"
-        status_text += f"📅 {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
-        status_text += f"⏰ {days_left} {get_text('days', user_lang)}\n\n"
+        status_text += f"📊 {get_text('subscription_status_title', user_lang)} - {status_icon} {get_text('active', user_lang)}\n"
         
+        # Дата окончания
+        if user_lang == 'ru':
+            status_text += f"📅 До {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        elif user_lang == 'ua':
+            status_text += f"📅 До {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        elif user_lang == 'en':
+            status_text += f"📅 Until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        else:
+            status_text += f"📅 {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        
+        # Осталось дней
+        if user_lang == 'ru':
+            days_text = f"{days_left} день" if days_left == 1 else f"{days_left} дня" if 2 <= days_left <= 4 else f"{days_left} дней"
+            status_text += f"⏰ Осталось {days_text}\n"
+        elif user_lang == 'ua':
+            days_text = f"{days_left} день" if days_left == 1 else f"{days_left} дні" if 2 <= days_left <= 4 else f"{days_left} днів"
+            status_text += f"⏰ Залишилось {days_text}\n"
+        elif user_lang == 'en':
+            days_text = f"{days_left} day{'s' if days_left != 1 else ''}"
+            status_text += f"⏰ {days_text} left\n"
+        else:
+            days_text = get_days_text(days_left, user_lang)
+            status_text += f"⏰ {days_text}\n"
+        
+        # Устройства (доступное количество из тарифа)
+        hwid_limit = user_data.get("hwidDeviceLimit")
+        if hwid_limit is not None:
+            if hwid_limit == -1 or hwid_limit >= 100:
+                status_text += f"📱 Устройств: {get_text('devices_unlimited', user_lang)}\n"
+            else:
+                status_text += f"📱 Устройств: {hwid_limit} {get_text('devices_available', user_lang)}\n"
+        
+        # Трафик — одна строка с прогресс-баром
+        if traffic_limit == 0:
+            status_text += f"📈 {get_text('traffic_title', user_lang)} - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
+        else:
+            used_gb = used_traffic / (1024 ** 3)
+            limit_gb = traffic_limit / (1024 ** 3)
+            percentage = (used_traffic / traffic_limit * 100) if traffic_limit > 0 else 0
+            filled = int(percentage / (100 / 15))
+            filled = min(filled, 15)
+            progress_bar = "█" * filled + "░" * (15 - filled)
+            progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
+            status_text += f"📈 {get_text('traffic_title', user_lang)} - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
+        
+        # Ссылка подключения
         if subscription_url:
-            status_text += f"🔗 **{get_text('subscription_link', user_lang)}**\n"
-            status_text += f"`{subscription_url}`\n\n"
-    else:
-        status_text += f"🔴 **{get_text('inactive', user_lang)}**\n"
-        status_text += f"💡 {get_text('subscription_not_active', user_lang)}\n\n"
-    
-    # Трафик с прогресс-баром - современный дизайн
-    status_text += f"📈 **{get_text('traffic_usage', user_lang)}**\n"
-    if traffic_limit == 0:
-        status_text += f"♾️ {get_text('unlimited_traffic_full', user_lang)}\n\n"
-    else:
-        used_gb = used_traffic / (1024 ** 3)
-        limit_gb = traffic_limit / (1024 ** 3)
-        percentage = (used_traffic / traffic_limit * 100) if traffic_limit > 0 else 0
+            status_text += f"🔗 {get_text('subscription_link', user_lang)}:\n"
+            status_text += f"`{subscription_url}`\n"
         
-        # Прогресс-бар (15 блоков)
-        filled = int(percentage / (100 / 15))
-        filled = min(filled, 15)
-        progress_bar = "█" * filled + "░" * (15 - filled)
-        progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
+        status_text += "--------------------------------\n"
+    else:
+        status_text += f"📊 {get_text('subscription_status_title', user_lang)} - 🔴 {get_text('inactive', user_lang)}\n"
+        status_text += f"💡 {get_text('subscription_not_active', user_lang)}\n"
         
-        status_text += f"{progress_color} {progress_bar} {percentage:.0f}%\n"
-        status_text += f"📥 {used_gb:.2f} / {limit_gb:.2f} GB\n\n"
+        # Трафик (при неактивной подписке)
+        if traffic_limit == 0:
+            status_text += f"📈 {get_text('traffic_title', user_lang)} - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
+        else:
+            used_gb = used_traffic / (1024 ** 3)
+            limit_gb = traffic_limit / (1024 ** 3)
+            percentage = (used_traffic / traffic_limit * 100) if traffic_limit > 0 else 0
+            filled = int(percentage / (100 / 15))
+            filled = min(filled, 15)
+            progress_bar = "█" * filled + "░" * (15 - filled)
+            progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
+            status_text += f"📈 {get_text('traffic_title', user_lang)} - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
+        
+        status_text += "--------------------------------\n"
     
-    # Данные для входа - современный дизайн
-    status_text += "━━━━━━━━━━━━━━━\n"
-    status_text += f"🔐 **{get_text('login_data_title', user_lang)}**\n"
+    # Данные для входа
+    status_text += f"\n🔐 {get_text('login_data_title', user_lang)}\n"
     
     credentials = api.get_credentials(telegram_id)
     if credentials and credentials.get("email"):
@@ -2732,7 +3033,7 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Моя подписка: статус + быстрые действия (конфиги/сервера/пополнение)."""
+    """Моя подписка: статус + быстрые действия (подписки/сервера/пополнение)."""
     query = update.callback_query
     if not query:
         return
@@ -2762,7 +3063,8 @@ async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_T
     preferred_currency = user_data.get("preferred_currency", "uah")
     currency_symbol = {"uah": "₴", "rub": "₽", "usd": "$"}.get(preferred_currency, "₴")
 
-    text = f"📊 **{get_text('status_button', user_lang)}**\n"
+    text = f"📊 {get_text('subscription_status_title', user_lang)}\n"
+    text += f" ID: {telegram_id}\n"
     text += f"{SEPARATOR_LINE}\n"
     text += f"💰 {get_text('balance', user_lang)}: {balance:.2f} {currency_symbol}\n"
 
@@ -2783,19 +3085,50 @@ async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_T
     if has_active_subscription and expire_date:
         status_icon = "🟢" if days_left > 7 else "🟡" if days_left > 0 else "🔴"
         text += f"📊 {get_text('subscription_status_title', user_lang)} - {status_icon} {get_text('active', user_lang)}\n"
-        text += f"📅 до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
-        text += f"⏰ осталось {get_days_text(days_left, user_lang)}\n"
+        if user_lang == 'ru':
+            text += f"📅 До {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        elif user_lang == 'ua':
+            text += f"📅 До {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        elif user_lang == 'en':
+            text += f"📅 Until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        else:
+            text += f"📅 {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        if user_lang == 'ru':
+            days_part = get_days_text(days_left, user_lang)
+            text += f"⏰ Осталось {days_part}\n"
+        elif user_lang == 'ua':
+            days_part = get_days_text(days_left, user_lang)
+            text += f"⏰ Залишилось {days_part}\n"
+        elif user_lang == 'en':
+            days_part = get_days_text(days_left, user_lang)
+            text += f"⏰ {days_part} left\n"
+        else:
+            text += f"⏰ {get_days_text(days_left, user_lang)}\n"
+        # Устройства из тарифа
+        hwid_limit = user_data.get("hwidDeviceLimit")
+        if hwid_limit is not None:
+            if hwid_limit == -1 or hwid_limit >= 100:
+                text += f"📱 Устройств: {get_text('devices_unlimited', user_lang)}\n"
+            else:
+                text += f"📱 Устройств: {hwid_limit} {get_text('devices_available', user_lang)}\n"
     else:
         text += f"📊 {get_text('subscription_status_title', user_lang)} - 🔴 {get_text('inactive', user_lang)}\n"
 
     if traffic_limit == 0:
-        # компактно, одной строкой
-        text += f"📈 {get_text('traffic_title', user_lang)} - ♾️ {get_text('unlimited', user_lang)}\n"
+        text += f"📈 {get_text('traffic_title', user_lang)} - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
     else:
         used_gb = used_traffic / (1024 ** 3)
         limit_gb = traffic_limit / (1024 ** 3)
         percentage = (used_traffic / traffic_limit * 100) if traffic_limit > 0 else 0
-        text += f"📈 {get_text('traffic_title', user_lang)} - {used_gb:.2f}/{limit_gb:.2f} GB ({percentage:.0f}%)\n"
+        filled = int(percentage / (100 / 15))
+        filled = min(filled, 15)
+        progress_bar = "█" * filled + "░" * (15 - filled)
+        progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
+        text += f"📈 {get_text('traffic_title', user_lang)} - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
+
+    if has_active_subscription and subscription_url:
+        text += f"🔗 {get_text('subscription_link', user_lang)}:\n"
+        text += f"`{subscription_url}`\n"
 
     text += f"{SEPARATOR_LINE}\n"
 
@@ -3234,12 +3567,21 @@ async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             pass
         
         # Отправляем новое сообщение с изображением
-        await context.bot.send_photo(
+        sent_message = await context.bot.send_photo(
             chat_id=query.message.chat_id,
             photo=photo_file,
             caption="Выберите длительность:",
             reply_markup=reply_markup
         )
+        
+        # Сохраняем message_id для последующего удаления
+        if sent_message and sent_message.message_id:
+            user_data = context.user_data if hasattr(context, 'user_data') else {}
+            if 'bot_message_ids' not in user_data:
+                user_data['bot_message_ids'] = []
+            user_data['bot_message_ids'].append(sent_message.message_id)
+            if len(user_data['bot_message_ids']) > 20:
+                user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
         
     except ImportError:
         # Если модуль не найден, используем текстовую версию (fallback)
@@ -3463,6 +3805,15 @@ async def show_option_payment_methods(update: Update, context: ContextTypes.DEFA
 
     token, user_data = get_user_data_safe(telegram_id, token)
     user_lang = get_user_lang(user_data, context, token)
+    
+    # Получаем валюту для отображения символа
+    currency = user_data.get("preferred_currency", "rub") if user_data else "rub"
+    currency_map = {
+        "uah": {"field": "price_uah", "symbol": "₴"},
+        "rub": {"field": "price_rub", "symbol": "₽"},
+        "usd": {"field": "price_usd", "symbol": "$"}
+    }
+    currency_config = currency_map.get(currency, currency_map["rub"])
 
     available_methods = api.get_available_payment_methods()
     if not available_methods:
@@ -3471,6 +3822,11 @@ async def show_option_payment_methods(update: Update, context: ContextTypes.DEFA
         await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
+    # Получаем информацию об опции для проверки баланса
+    from modules.models.option import PurchaseOption
+    from modules.currency import convert_to_usd, convert_from_usd
+    option = PurchaseOption.query.get(option_id)
+    
     text = "💳 **Способ оплаты**\n\nВыберите метод оплаты:"
     keyboard = []
 
@@ -3482,6 +3838,7 @@ async def show_option_payment_methods(update: Update, context: ContextTypes.DEFA
         "platega": "Platega",
         "platega_mir": "Platega (МИР)",
         "freekassa": "FreeKassa",
+        "kassa_ai": "Kassa AI",
         "robokassa": "Robokassa",
         "cryptobot": "CryptoBot",
         "telegram_stars": "Telegram Stars",
@@ -3493,8 +3850,44 @@ async def show_option_payment_methods(update: Update, context: ContextTypes.DEFA
     }
 
     for provider in available_methods:
+        # Исключаем баланс из списка внешних методов (добавим отдельно)
+        if provider == "balance":
+            continue
         name = provider_names.get(provider, provider)
         keyboard.append([InlineKeyboardButton(f"💳 {name}", callback_data=f"optpay_{option_id}_{provider}")])
+
+    # Добавляем кнопку оплаты с баланса, если опция найдена
+    if option:
+        currency_price_map = {
+            "uah": ("UAH", option.price_uah),
+            "rub": ("RUB", option.price_rub),
+            "usd": ("USD", option.price_usd)
+        }
+        currency_code, option_price = currency_price_map.get(str(currency).lower(), ("RUB", option.price_rub))
+        
+        if option_price and option_price > 0:
+            # Получаем баланс пользователя
+            from modules.models.user import User
+            user = User.query.filter_by(telegram_id=str(telegram_id)).first()
+            balance_usd = float(user.balance) if user and user.balance else 0.0
+            option_price_usd = convert_to_usd(option_price, currency_code)
+            
+            can_afford = balance_usd >= option_price_usd
+            
+            if can_afford:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"💰 {get_text('pay_with_balance', user_lang)} ({option_price:.0f} {currency_config['symbol']})",
+                        callback_data=f"optpay_{option_id}_balance"
+                    )
+                ])
+            else:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"💰 {get_text('pay_with_balance', user_lang)} ({get_text('insufficient_balance', user_lang)})",
+                        callback_data=f"optpay_{option_id}_balance"
+                    )
+                ])
 
     keyboard.append([InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data="options")])
     await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -4419,6 +4812,30 @@ async def show_refund_policy(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await safe_edit_or_send_with_logo(update, context, clean_markdown_for_cards(policy_text), reply_markup=reply_markup)
 
 
+async def delete_recent_bot_messages(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_data: dict, max_messages: int = 10):
+    """Удалить последние сообщения бота в чате"""
+    try:
+        # Получаем список сохраненных message_id из user_data
+        bot_message_ids = user_data.get('bot_message_ids', [])
+        if not bot_message_ids:
+            return
+        
+        # Удаляем последние сообщения (не более max_messages)
+        messages_to_delete = bot_message_ids[-max_messages:]
+        
+        for msg_id in messages_to_delete:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except Exception as e:
+                # Игнорируем ошибки удаления (сообщение уже удалено или недоступно)
+                logger.debug(f"Could not delete message {msg_id}: {e}")
+        
+        # Очищаем список после удаления
+        user_data['bot_message_ids'] = []
+    except Exception as e:
+        logger.debug(f"Error deleting recent messages: {e}")
+
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик нажатий на inline кнопки"""
     query = update.callback_query
@@ -4440,6 +4857,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Error answering callback query: {e}")
         # Продолжаем выполнение даже если не удалось ответить
     
+    # Удаляем предыдущие сообщения бота только в специальных случаях
+    # (например, при переходе в главное меню через кнопку рассылки или при очистке)
+    # В остальных случаях редактируем текущее сообщение на месте
+    if data == "clear_and_main_menu":
+        user = update.effective_user
+        chat_id = query.message.chat_id if query.message else user.id
+        user_data = context.user_data
+        await delete_recent_bot_messages(context, chat_id, user_data, max_messages=20)
+    
     if data == "user_agreement":
         await show_user_agreement(update, context)
         return
@@ -4447,6 +4873,25 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "offer":
         await show_offer(update, context)
         return
+    
+    if data == "clear_and_main_menu":
+        # Удаляем все сообщения и показываем главное меню (используется в рассылках)
+        user = update.effective_user
+        telegram_id = user.id
+        chat_id = query.message.chat_id if query.message else telegram_id
+        
+        # Удаляем все сообщения бота
+        user_data = context.user_data
+        bot_message_ids = user_data.get('bot_message_ids', [])
+        for msg_id in bot_message_ids:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except Exception:
+                pass
+        user_data['bot_message_ids'] = []
+        
+        # Переходим к обработке main_menu
+        data = "main_menu"
     
     if data == "main_menu":
         # Возвращаемся к главному меню с полной информацией
@@ -4463,6 +4908,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 welcome_text = f"🛡 **{get_text('stealthnet_bot', user_lang)}**\n"
                 welcome_text += f"👋 {get_text('main_menu_button', user_lang)}\n"
+                welcome_text += f" {get_text('your_id', user_lang)}: {telegram_id}\n"
                 welcome_text += "━━━━━━━━━━━━━━━\n"
                 
                 # Баланс
@@ -4532,6 +4978,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         days_text = get_days_text(days_left, user_lang)
                         welcome_text += f"⏰ {days_text}\n"
                     
+                    # Устройства (доступное количество из тарифа)
+                    hwid_limit = user_data.get("hwidDeviceLimit")
+                    if hwid_limit is not None:
+                        if hwid_limit == -1 or hwid_limit >= 100:
+                            welcome_text += f"📱 **Устройств:** {get_text('devices_unlimited', user_lang)}\n"
+                        else:
+                            welcome_text += f"📱 **Устройств:** {hwid_limit} {get_text('devices_available', user_lang)}\n"
+                    
                     # Трафик - в одну строку
                     if traffic_limit == 0:
                         welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
@@ -4546,6 +5000,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
                         
                         welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
+                    
+                    # Ссылка подключения (своя для каждого пользователя)
+                    if subscription_url:
+                        welcome_text += f"🔗 **{get_text('subscription_link', user_lang)}:**\n"
+                        welcome_text += f"`{subscription_url}`\n"
                     
                     welcome_text += "━━━━━━━━━━━━━━━\n"
                 else:
@@ -4659,6 +5118,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["preferred_create_new_config"] = False
         await show_tariffs(update, context)
     
+    elif data.startswith("share_config_"):
+        try:
+            cfg_id = int(data.replace("share_config_", ""))
+            await handle_share_config(update, context, cfg_id)
+        except Exception as e:
+            logger.error(f"Error handling share_config: {e}")
+            await query.answer("❌ Ошибка при создании ссылки", show_alert=True)
+    
+    elif data.startswith("accept_config_"):
+        try:
+            share_token = data.replace("accept_config_", "")
+            await handle_accept_shared_config(update, context, share_token)
+        except Exception as e:
+            logger.error(f"Error accepting config: {e}")
+            await query.answer("❌ Ошибка при принятии подписки", show_alert=True)
+    
+    elif data.startswith("copy_share_token_"):
+        share_token = data.replace("copy_share_token_", "")
+        bot_username = os.getenv("CLIENT_BOT_USERNAME", "").replace("@", "")
+        share_text = f"@{bot_username} {share_token}"
+        await query.answer(f"✅ Токен скопирован: {share_text}", show_alert=False)
+    
     elif data.startswith("tier_"):
         tier = data.replace("tier_", "")
         await show_tier_tariffs(update, context, tier)
@@ -4684,7 +5165,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.callback_query.answer("❌ Ошибка авторизации")
             return
 
-        # применяем к выбранному конфигу (если пользователь ранее выбирал в конфиг-меню)
+        # применяем к выбранной подписке (если пользователь ранее выбирал в меню подписок)
         cfg_id = None
         try:
             cfg_id = context.user_data.get("preferred_config_id")
@@ -4696,7 +5177,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data_api = api.get_user_data(token) or {}
         user_lang = get_user_lang(user_data_api, context, token)
 
-        if result.get("payment_url"):
+        # Если оплата с баланса прошла успешно (payment_url == null и success == true)
+        if result.get("success") or (result.get("payment_url") is None and provider == "balance"):
+            text = "✅ **Опция успешно приобретена!**\n\n"
+            text += f"💎 Опция активирована с баланса!\n"
+            if result.get("balance") is not None:
+                text += f"💰 Остаток баланса: {result.get('balance', 0):.2f}\n\n"
+            text += f"🎉 Опция применена к вашей подписке!"
+            keyboard = [
+                [InlineKeyboardButton("🔙 Назад", callback_data="options")],
+                [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+            ]
+            await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        elif result.get("payment_url"):
             payment_url = result["payment_url"]
             text = "✅ Платеж создан.\n\n"
             text += f"Нажмите кнопку ниже, чтобы оплатить:"
@@ -5297,10 +5790,10 @@ async def show_channel_subscription_required(update: Update, context: ContextTyp
             await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
     else:
         try:
-            await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode="Markdown", context=context)
         except Exception as e:
             logger.warning(f"Error in show_channel_subscription_required (message): {e}")
-            await reply_with_logo(update, clean_markdown_for_cards(text), reply_markup=reply_markup)
+            await reply_with_logo(update, clean_markdown_for_cards(text), reply_markup=reply_markup, context=context)
 
 
 async def register_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5804,25 +6297,25 @@ async def select_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE, tari
         'btcpayserver': '₿ BTCPayServer',
         'tribute': '💳 Tribute',
         'robokassa': '💳 Robokassa',
-        'freekassa': '💳 Freekassa'
+        'freekassa': '💳 Freekassa',
+        'kassa_ai': '💳 Kassa AI'
     }
     
     keyboard = []
     row = []
     
-    # Добавляем только доступные способы оплаты
+    # Добавляем все способы оплаты, возвращённые API (кроме balance — он ниже)
     for method in available_methods:
-        if method in payment_names:
-            row.append(InlineKeyboardButton(
-                payment_names[method],
-                callback_data=f"pay_{tariff_id}_{method}"
-            ))
-            # По 2 кнопки в ряд
-            if len(row) == 2:
-                keyboard.append(row)
-                row = []
-    
-    # Добавляем оставшиеся кнопки
+        if method == "balance":
+            continue
+        label = payment_names.get(method, f"💳 {method}")
+        row.append(InlineKeyboardButton(
+            label,
+            callback_data=f"pay_{tariff_id}_{method}"
+        ))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
     if row:
         keyboard.append(row)
     
@@ -6023,7 +6516,7 @@ async def handle_payment(
 
 
 async def choose_config_for_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff_id: int, provider: str):
-    """Шаг выбора конфига перед оплатой/продлением"""
+    """Шаг выбора подписки перед оплатой/продлением"""
     query = update.callback_query
     if not query:
         return
@@ -6043,15 +6536,15 @@ async def choose_config_for_payment(update: Update, context: ContextTypes.DEFAUL
     cfgs_resp = api.get_configs(token)
     cfgs = (cfgs_resp or {}).get('configs') or []
 
-    text = "🧩 **Выберите конфиг для оплаты**\n"
+    text = "🧩 **Выберите подписку для оплаты**\n"
     text += "━━━━━━━━━━━━━━━\n\n"
-    text += "Оплата/продление будет применено к выбранному конфигу.\n"
+    text += "Оплата/продление будет применено к выбранной подписке.\n"
 
     keyboard = []
     for cfg in cfgs:
         try:
             cfg_id = cfg.get('id')
-            name = cfg.get('config_name') or f"Конфиг {cfg_id}"
+            name = cfg.get('config_name') or f"Подписка {cfg_id}"
             is_primary = bool(cfg.get('is_primary'))
             prefix = "⭐" if is_primary else "🧩"
             keyboard.append([
@@ -6060,9 +6553,9 @@ async def choose_config_for_payment(update: Update, context: ContextTypes.DEFAUL
         except Exception:
             continue
 
-    # Кнопка "новый конфиг" — создаст новый конфиг после успешной оплаты
+    # Кнопка "новая подписка" — создаст новую подписку после успешной оплаты
     keyboard.append([
-        InlineKeyboardButton("➕ Новый конфиг", callback_data=f"pay_{tariff_id}_{provider}_newcfg")
+        InlineKeyboardButton("➕ Новая подписка", callback_data=f"pay_{tariff_id}_{provider}_newcfg")
     ])
 
     keyboard.append([
@@ -6097,11 +6590,11 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = f"🧩 **{get_text('configs_button', user_lang)}**\n"
     text += f"{SEPARATOR_LINE}\n"
     if not cfgs:
-        text += "Конфиги не найдены.\n"
+        text += "Подписки не найдены.\n"
         text += f"{SEPARATOR_LINE}\n"
     else:
         for cfg in cfgs:
-            name = cfg.get('config_name') or f"Конфиг {cfg.get('id')}"
+            name = cfg.get('config_name') or f"Подписка {cfg.get('id')}"
             is_primary = bool(cfg.get('is_primary'))
             status = "🟢 активен" if cfg.get('is_active') else "🔴 неактивен"
             exp = cfg.get('expire_at')
@@ -6122,21 +6615,311 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     for cfg in cfgs:
         cfg_id = cfg.get('id')
-        name = cfg.get('config_name') or f"Конфиг {cfg_id}"
+        name = cfg.get('config_name') or f"Подписка {cfg_id}"
         sub_url = cfg.get('subscription_url')
         row = []
         if sub_url:
             row.append(InlineKeyboardButton(f"🚀 {name}", url=sub_url))
         row.append(InlineKeyboardButton("💎 Продлить", callback_data=f"tariffs_cfg_{cfg_id}"))
+        row.append(InlineKeyboardButton("📤 Поделиться", callback_data=f"share_config_{cfg_id}"))
         keyboard.append(row)
 
-    keyboard.append([InlineKeyboardButton("➕ Новый конфиг", callback_data="tariffs_newcfg")])
+    keyboard.append([InlineKeyboardButton("➕ Новая подписка", callback_data="tariffs_newcfg")])
     back_to = pop_back_callback(context, "main_menu")
     keyboard.append([InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data=back_to)])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     temp_update = Update(update_id=0, callback_query=query)
     await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+
+
+async def handle_share_config(update: Update, context: ContextTypes.DEFAULT_TYPE, config_id: int):
+    """Обработка запроса на создание токена для обмена подпиской"""
+    query = update.callback_query
+    if not query:
+        return
+    
+    user = update.effective_user
+    telegram_id = user.id
+    token = get_user_token(telegram_id)
+    if not token:
+        lang = get_user_lang(None, context, token)
+        await query.answer(f"❌ {get_text('auth_error', lang)}", show_alert=True)
+        return
+    
+    token, user_data = get_user_data_safe(telegram_id, token)
+    user_lang = get_user_lang(user_data, context, token)
+    
+    try:
+        # Создаем токен через API
+        response = requests.post(
+            f"{FLASK_API_URL}/api/client/configs/{config_id}/share-token",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"expires_hours": 168, "max_uses": 1},  # 7 дней, 1 использование
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            await query.answer("❌ Ошибка при создании ссылки", show_alert=True)
+            return
+        
+        share_data = response.json()
+        share_token = share_data.get('token')
+        
+        if not share_token:
+            await query.answer("❌ Ошибка при создании ссылки", show_alert=True)
+            return
+        
+        # Получаем информацию о конфиге
+        cfgs_resp = api.get_configs(token, force_refresh=True)
+        cfgs = (cfgs_resp or {}).get('configs') or []
+        config = next((c for c in cfgs if c.get('id') == config_id), None)
+        
+        config_name = config.get('config_name') if config else f"Подписка {config_id}"
+        # Получаем username бота (без @)
+        bot_username = (
+            os.getenv("TELEGRAM_BOT_NAME_V2") or 
+            os.getenv("TELEGRAM_BOT_NAME") or 
+            os.getenv("BOT_USERNAME") or 
+            os.getenv("CLIENT_BOT_USERNAME", "")
+        ).replace("@", "")
+        
+        # Формируем текст с инструкцией
+        text = f"📤 **Поделиться подпиской**\n"
+        text += f"{SEPARATOR_LINE}\n\n"
+        text += f"🧩 **{config_name}**\n\n"
+        text += f"Чтобы поделиться этой подпиской:\n\n"
+        text += f"📋 Скопируйте данное сообщение и перешлите тому, с кем хотите поделиться подпиской:\n\n"
+        text += f"`@{bot_username} {share_token}`\n\n"
+        text += f"💡 Ссылка действительна 7 дней\n"
+        text += f"📊 Можно использовать 1 раз\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("📋 Скопировать токен", callback_data=f"copy_share_token_{share_token}")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="sub_configs")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        temp_update = Update(update_id=0, callback_query=query)
+        await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.answer("✅ Ссылка создана!")
+        
+    except Exception as e:
+        logger.error(f"Error creating share token: {e}")
+        await query.answer("❌ Ошибка при создании ссылки", show_alert=True)
+
+
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик inline запросов для обмена подписками"""
+    inline_query = update.inline_query
+    if not inline_query:
+        return
+    
+    query_text = inline_query.query.strip()
+    if not query_text:
+        # Показываем инструкцию, если запрос пустой
+        results = [
+            InlineQueryResultArticle(
+                id="help",
+                title="📤 Поделиться подпиской",
+                description="Введите токен подписки для получения доступа",
+                input_message_content=InputTextMessageContent(
+                    message_text="Введите токен подписки, который вам прислали"
+                )
+            )
+        ]
+        await inline_query.answer(results, cache_time=1)
+        return
+    
+    # Проверяем, является ли запрос токеном
+    try:
+        # Получаем информацию о подписке по токену
+        response = requests.get(
+            f"{FLASK_API_URL}/api/public/config-share/{query_text}",
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            # Токен не найден или невалиден
+            results = [
+                InlineQueryResultArticle(
+                    id="invalid",
+                    title="❌ Токен не найден",
+                    description="Проверьте правильность токена",
+                    input_message_content=InputTextMessageContent(
+                        message_text="❌ Токен подписки не найден или истек"
+                    )
+                )
+            ]
+            await inline_query.answer(results, cache_time=1)
+            return
+        
+        config_data = response.json()
+        config_name = config_data.get('config_name', 'Подписка')
+        owner_username = config_data.get('owner_username', 'пользователя')
+        is_active = config_data.get('is_active', False)
+        subscription_url = config_data.get('subscription_url')
+        
+        # Формируем результат
+        status_text = "🟢 Активен" if is_active else "🔴 Неактивен"
+        description = f"{config_name} от {owner_username} • {status_text}"
+        
+        # Формируем сообщение с информацией о подписке
+        # Используем простой текст без Markdown, чтобы избежать проблем с парсингом
+        message_text = f"🧩 {config_name}\n"
+        message_text += f"От: {owner_username}\n"
+        message_text += f"Статус: {status_text}\n\n"
+        message_text += f"Нажмите кнопку ниже, чтобы получить доступ к этой подписке."
+        
+        # Создаем кнопку для принятия подписки
+        accept_button = InlineKeyboardButton(
+            "✅ Получить подписку",
+            callback_data=f"accept_config_{query_text}"
+        )
+        keyboard = InlineKeyboardMarkup([[accept_button]])
+        
+        # ID должен быть уникальным, но не слишком длинным (максимум 64 символа)
+        # Используем хеш токена для ID
+        result_id = hashlib.md5(query_text.encode()).hexdigest()[:32]
+        
+        # Ограничиваем длину description (максимум 255 символов)
+        if len(description) > 255:
+            description = description[:252] + "..."
+        
+        # Ограничиваем длину title (максимум 64 символа)
+        title = f"🧩 {config_name}"
+        if len(title) > 64:
+            title = title[:61] + "..."
+        
+        # Создаем результат с кнопкой прямо в сообщении
+        # reply_markup добавляется к InlineQueryResultArticle и будет в отправленном сообщении
+        results = [
+            InlineQueryResultArticle(
+                id=result_id,
+                title=title,
+                description=description,
+                input_message_content=InputTextMessageContent(
+                    message_text=message_text
+                ),
+                reply_markup=keyboard
+            )
+        ]
+        
+        await inline_query.answer(results, cache_time=1)
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Error handling inline query: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Показываем более информативное сообщение об ошибке
+        error_msg = str(e)[:100]  # Ограничиваем длину
+        results = [
+            InlineQueryResultArticle(
+                id="error",
+                title="❌ Ошибка",
+                description=f"Ошибка: {error_msg}",
+                input_message_content=InputTextMessageContent(
+                    message_text=f"❌ Произошла ошибка при обработке запроса: {error_msg}"
+                )
+            )
+        ]
+        try:
+            await inline_query.answer(results, cache_time=1)
+        except Exception as answer_error:
+            logger.error(f"Error answering inline query: {answer_error}")
+
+
+async def handle_accept_shared_config(update: Update, context: ContextTypes.DEFAULT_TYPE, share_token: str):
+    """Обработка принятия подписки по токену"""
+    query = update.callback_query
+    if not query:
+        return
+    
+    user = update.effective_user
+    telegram_id = user.id
+    token = get_user_token(telegram_id)
+    if not token:
+        lang = get_user_lang(None, context, token)
+        await query.answer(f"❌ {get_text('auth_error', lang)}", show_alert=True)
+        return
+    
+    token, user_data = get_user_data_safe(telegram_id, token)
+    user_lang = get_user_lang(user_data, context, token)
+    
+    try:
+        # Принимаем подписку через API
+        response = requests.post(
+            f"{FLASK_API_URL}/api/client/configs/share/{share_token}/accept",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            config_id = result.get('config_id')
+            
+            text = f"✅ **Подписка успешно добавлена!**\n\n"
+            text += f"🧩 Подписка добавлена в ваш список подписок.\n"
+            text += f"Вы можете найти её в разделе «Подписки»."
+            
+            keyboard = [
+                [InlineKeyboardButton("🧩 Мои подписки", callback_data="sub_configs")],
+                [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Проверяем, есть ли сообщение для редактирования
+            if query.message:
+                # Пытаемся отредактировать сообщение
+                try:
+                    await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+                except Exception as edit_error:
+                    logger.debug(f"Could not edit message, sending new one: {edit_error}")
+                    # Если не удалось отредактировать, отправляем новое сообщение
+                    await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode="Markdown", context=context)
+            else:
+                # Если сообщения нет (например, отправлено через inline режим в другой чат),
+                # отправляем новое сообщение напрямую пользователю
+                try:
+                    chat_id = user.id
+                    if os.path.exists(LOGO_PATH):
+                        with open(LOGO_PATH, 'rb') as logo_file:
+                            await context.bot.send_photo(
+                                chat_id=chat_id,
+                                photo=logo_file,
+                                caption=text,
+                                reply_markup=reply_markup,
+                                parse_mode="Markdown"
+                            )
+                    else:
+                        await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=text,
+                            reply_markup=reply_markup,
+                            parse_mode="Markdown"
+                        )
+                except Exception as send_error:
+                    logger.error(f"Error sending message to user: {send_error}")
+                    # Fallback - просто отвечаем на callback
+                    await query.answer("✅ Подписка добавлена! Проверьте раздел «Подписки»", show_alert=True)
+                    return
+            
+            await query.answer("✅ Подписка добавлена!")
+            
+        elif response.status_code == 400:
+            result = response.json()
+            message = result.get('message', 'Ошибка')
+            await query.answer(f"❌ {message}", show_alert=True)
+        else:
+            await query.answer("❌ Ошибка при принятии подписки", show_alert=True)
+            
+    except Exception as e:
+        logger.error(f"Error accepting shared config: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        await query.answer("❌ Ошибка при принятии подписки", show_alert=True)
 
 
 async def show_topup_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6226,7 +7009,7 @@ async def select_topup_method(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.answer(f"❌ {get_text('auth_error', lang)}")
         elif message:
             temp_update = Update(update_id=0, message=message)
-            await reply_with_logo(temp_update, f"❌ {get_text('auth_error', lang)}")
+            await reply_with_logo(temp_update, f"❌ {get_text('auth_error', lang)}", context=context)
         return
     
     token, user_data = get_user_data_safe(telegram_id, token)
@@ -6255,22 +7038,24 @@ async def select_topup_method(update: Update, context: ContextTypes.DEFAULT_TYPE
         'btcpayserver': '₿ BTCPayServer',
         'tribute': '💳 Tribute',
         'robokassa': '💳 Robokassa',
-        'freekassa': '💳 Freekassa'
+        'freekassa': '💳 Freekassa',
+        'kassa_ai': '💳 Kassa AI'
     }
     
     keyboard = []
     row = []
     
     for method in available_methods:
-        if method in payment_names:
-            row.append(InlineKeyboardButton(
-                payment_names[method],
-                callback_data=f"topup_pay_{amount}_{method}"
-            ))
-            if len(row) == 2:
-                keyboard.append(row)
-                row = []
-    
+        if method == "balance":
+            continue
+        label = payment_names.get(method, f"💳 {method}")
+        row.append(InlineKeyboardButton(
+            label,
+            callback_data=f"topup_pay_{amount}_{method}"
+        ))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
     if row:
         keyboard.append(row)
     
@@ -6411,9 +7196,9 @@ def main():
                 raw = query.data
 
                 # Форматы:
-                # 1) pay_{tariffId}_{provider}                    -> показать выбор конфига
-                # 2) pay_{tariffId}_{provider}_cfg_{configId}     -> оплатить выбранный конфиг
-                # 3) pay_{tariffId}_{provider}_newcfg             -> создать новый конфиг после оплаты
+                # 1) pay_{tariffId}_{provider}                    -> показать выбор подписки
+                # 2) pay_{tariffId}_{provider}_cfg_{configId}     -> оплатить выбранную подписку
+                # 3) pay_{tariffId}_{provider}_newcfg             -> создать новую подписку после оплаты
 
                 parts = raw.split("_")
                 if len(parts) < 3:
@@ -6422,7 +7207,7 @@ def main():
 
                 tariff_id = int(parts[1])
 
-                # Выбран конкретный конфиг
+                # Выбрана конкретная подписка
                 if "_cfg_" in raw:
                     left, cfg_id_str = raw.split("_cfg_", 1)
                     provider = left.split("_", 2)[2]  # pay, tariffId, provider(with underscores)
@@ -6430,7 +7215,7 @@ def main():
                     await handle_payment(update, context, tariff_id, provider, config_id=config_id)
                     return
 
-                # Новый конфиг
+                # Новая подписка
                 if raw.endswith("_newcfg"):
                     left = raw[:-len("_newcfg")]
                     provider = left.split("_", 2)[2]
@@ -6442,7 +7227,7 @@ def main():
                 preferred_cfg = context.user_data.get("preferred_config_id")
                 preferred_new = bool(context.user_data.get("preferred_create_new_config"))
 
-                # Если пользователь пришел из "Мои конфиги" и выбрал конкретный конфиг — пропускаем шаг выбора
+                # Если пользователь пришел из "Мои подписки" и выбрал конкретную подписку — пропускаем шаг выбора
                 if preferred_new:
                     context.user_data["preferred_config_id"] = None
                     context.user_data["preferred_create_new_config"] = False
@@ -6463,6 +7248,9 @@ def main():
     
     # Регистрируем обработчик платежей ПЕРВЫМ (более специфичный паттерн)
     application.add_handler(CallbackQueryHandler(payment_callback, pattern="^pay_"))
+    
+    # Обработчик inline запросов (для обмена подписками)
+    application.add_handler(InlineQueryHandler(handle_inline_query))
     
     # Регистрируем общий обработчик callback кнопок ПОСЛЕ специфичных
     application.add_handler(CallbackQueryHandler(button_callback))
@@ -6621,6 +7409,68 @@ def main():
                         update,
                         f"❌ {get_text('invalid_amount_format', user_lang)}"
                     )
+            
+            else:
+                # Проверяем, не содержит ли сообщение токен подписки (отправленным через inline режим)
+                message_text = update.message.text.strip()
+                
+                # Ищем токен в сообщении - он может быть:
+                # 1. Чистым токеном (без пробелов, 20-100 символов)
+                # 2. В тексте после "Токен: " или "токен: " или похожих паттернов
+                share_token = None
+                
+                # Сначала проверяем, является ли всё сообщение токеном
+                if (len(message_text) >= 20 and 
+                    len(message_text) <= 100 and
+                    not ' ' in message_text and
+                    re.match(r'^[a-zA-Z0-9_-]+$', message_text)):
+                    share_token = message_text
+                else:
+                    # Ищем токен в тексте сообщения (после "Токен:", "токен:", "Token:" и т.д.)
+                    # Паттерн: слово "токен" (любой регистр) + двоеточие/пробел + токен (20-100 символов)
+                    token_pattern = r'(?:токен|token)[:\s]+([a-zA-Z0-9_-]{20,100})'
+                    match = re.search(token_pattern, message_text, re.IGNORECASE)
+                    if match:
+                        share_token = match.group(1)
+                
+                # Если нашли потенциальный токен, проверяем его через API
+                if share_token:
+                    try:
+                        # Пробуем получить информацию о подписке по токену
+                        response = requests.get(
+                            f"{FLASK_API_URL}/api/public/config-share/{share_token}",
+                            timeout=5
+                        )
+                        
+                        if response.status_code == 200:
+                            # Это валидный токен подписки, предлагаем принять
+                            config_data = response.json()
+                            config_name = config_data.get('config_name', 'Подписка')
+                            owner_username = config_data.get('owner_username', 'пользователя')
+                            
+                            telegram_id = update.effective_user.id
+                            user_token = get_user_token(telegram_id)
+                            
+                            if user_token:
+                                token, user_data_api = get_user_data_safe(telegram_id, user_token)
+                                user_lang = get_user_lang(user_data_api, context, user_token)
+                                
+                                text = f"🧩 **{config_name}**\n"
+                                text += f"От: {owner_username}\n\n"
+                                text += f"Хотите получить доступ к этой подписке?"
+                                
+                                keyboard = [
+                                    [InlineKeyboardButton("✅ Получить подписку", callback_data=f"accept_config_{share_token}")],
+                                    [InlineKeyboardButton("❌ Отмена", callback_data="main_menu")]
+                                ]
+                                reply_markup = InlineKeyboardMarkup(keyboard)
+                                
+                                await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode="Markdown", context=context)
+                                return  # Не обрабатываем дальше
+                    except Exception as e:
+                        # Игнорируем ошибки при проверке токена (это не токен или токен невалиден)
+                        logger.debug(f"Token check failed (not a subscription token): {e}")
+                        pass
     
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
@@ -6655,12 +7505,29 @@ def main():
         
         successful_payment = message.successful_payment
         order_id = successful_payment.invoice_payload
-        
-        logger.info(f"Successful payment received: order_id={order_id}")
-        
-        # Отправляем уведомление пользователю
         user = update.effective_user
         telegram_id = user.id
+        
+        logger.info(f"Successful payment received: order_id={order_id}, telegram_id={telegram_id}")
+        
+        # При polling бот получает обновления, вебхук Flask не вызывается — обрабатываем платеж через внутренний API
+        try:
+            import asyncio
+            def _process_payment():
+                r = requests.post(
+                    f"{FLASK_API_URL}/api/internal/process-telegram-payment",
+                    headers={"Content-Type": "application/json", "X-Internal-Key": "telegram-stars-internal"},
+                    json={"order_id": order_id, "telegram_id": telegram_id},
+                    timeout=15
+                )
+                return r
+            resp = await asyncio.to_thread(_process_payment)
+            if resp.status_code == 200:
+                logger.info(f"Payment processed via internal API: order_id={order_id}")
+            else:
+                logger.warning(f"Internal API returned {resp.status_code} for order_id={order_id}: {resp.text[:200]}")
+        except Exception as e:
+            logger.exception(f"Failed to process Telegram Stars payment via internal API: {e}")
         
         token = get_user_token(telegram_id)
         if not token:
@@ -6670,16 +7537,14 @@ def main():
         token, user_data = get_user_data_safe(telegram_id, token)
         user_lang = get_user_lang(user_data, context, token)
         
-        # Платеж обрабатывается через вебхук, просто уведомляем пользователя
         text = f"✅ **{get_text('payment_successful', user_lang)}**\n\n"
         text += f"💳 {get_text('payment_processed', user_lang)}\n\n"
         text += f"🔄 {get_text('subscription_updating', user_lang)}"
         
-        await reply_with_logo(update, text, parse_mode="Markdown")
+        await reply_with_logo(update, text, parse_mode="Markdown", context=context)
         
-        # Даем время вебхуку обработать платеж, затем обновляем статус
         import asyncio
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         
         # Обновляем данные пользователя - создаем временный callback для показа главного меню
         # Вебхук уже обработал платеж, подписка обновлена
@@ -6717,51 +7582,74 @@ def main():
     
     application.add_error_handler(error_handler)
     
-    # Запускаем бота
+    # Запускаем бота: webhook или polling
     logger.info("Бот запущен и готов к работе!")
-    # Удаляем webhook перед запуском polling (если он установлен)
-    try:
-        logger.info("Checking for active webhook...")
-        # Используем прямой HTTP запрос для удаления webhook
-        bot_token = CLIENT_BOT_TOKEN
-        webhook_info_url = f"https://api.telegram.org/bot{bot_token}/getWebhookInfo"
-        delete_webhook_url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
-        
-        # Проверяем наличие webhook
-        webhook_response = requests.get(webhook_info_url, timeout=5)
-        if webhook_response.status_code == 200:
-            webhook_data = webhook_response.json()
-            if webhook_data.get('ok') and webhook_data.get('result', {}).get('url'):
-                webhook_url = webhook_data['result']['url']
-                logger.info(f"Found active webhook: {webhook_url}. Deleting it...")
-                # Удаляем webhook
-                delete_response = requests.post(
-                    delete_webhook_url,
-                    json={"drop_pending_updates": True},
-                    timeout=5
-                )
-                if delete_response.status_code == 200 and delete_response.json().get('ok'):
-                    logger.info("Webhook deleted successfully")
-                else:
-                    logger.warning(f"Failed to delete webhook: {delete_response.text}")
-            else:
-                logger.info("No active webhook found")
-        else:
-            logger.warning(f"Failed to check webhook status: {webhook_response.text}")
-    except Exception as e:
-        logger.warning(f"Error checking/deleting webhook: {e}. Continuing with polling...")
     
-    # Очищаем предыдущие обновления перед запуском polling
-    try:
-        logger.info("Starting bot with polling...")
-        # Используем drop_pending_updates=True для очистки старых обновлений
-        application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True  # Очищаем старые обновления при запуске
-        )
-    except Exception as e:
-        logger.error(f"Error starting bot: {e}")
-        raise
+    if BOT_USE_WEBHOOK and BOT_WEBHOOK_BASE_URL:
+        # Режим webhook: Telegram шлёт обновления на наш URL
+        webhook_url = f"{BOT_WEBHOOK_BASE_URL}/{BOT_WEBHOOK_PATH}"
+        try:
+            async def _set_webhook():
+                await application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+            asyncio.run(_set_webhook())
+            logger.info(f"Webhook set: {webhook_url}")
+        except Exception as e:
+            logger.error(f"Failed to set webhook: {e}")
+            raise
+        try:
+            logger.info(f"Starting bot with webhook on 0.0.0.0:{BOT_WEBHOOK_PORT}/{BOT_WEBHOOK_PATH}...")
+            if not hasattr(application, "run_webhook"):
+                logger.error(
+                    "Application.run_webhook not found (your python-telegram-bot version may use custom webhook). "
+                    "See docs/BOT_WEBHOOK.md for alternatives or use BOT_USE_WEBHOOK=false for polling."
+                )
+                raise RuntimeError("run_webhook not available")
+            application.run_webhook(
+                listen="0.0.0.0",
+                port=BOT_WEBHOOK_PORT,
+                url_path=BOT_WEBHOOK_PATH,
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True
+            )
+        except Exception as e:
+            logger.error(f"Error running webhook: {e}")
+            raise
+    else:
+        # Режим polling: удаляем webhook и опрашиваем getUpdates
+        try:
+            logger.info("Checking for active webhook...")
+            bot_token = CLIENT_BOT_TOKEN
+            webhook_info_url = f"https://api.telegram.org/bot{bot_token}/getWebhookInfo"
+            delete_webhook_url = f"https://api.telegram.org/bot{bot_token}/deleteWebhook"
+            webhook_response = requests.get(webhook_info_url, timeout=5)
+            if webhook_response.status_code == 200:
+                webhook_data = webhook_response.json()
+                if webhook_data.get('ok') and webhook_data.get('result', {}).get('url'):
+                    logger.info(f"Found active webhook. Deleting it...")
+                    delete_response = requests.post(
+                        delete_webhook_url,
+                        json={"drop_pending_updates": True},
+                        timeout=5
+                    )
+                    if delete_response.status_code == 200 and delete_response.json().get('ok'):
+                        logger.info("Webhook deleted successfully")
+                    else:
+                        logger.warning(f"Failed to delete webhook: {delete_response.text}")
+                else:
+                    logger.info("No active webhook found")
+            else:
+                logger.warning(f"Failed to check webhook status: {webhook_response.text}")
+        except Exception as e:
+            logger.warning(f"Error checking/deleting webhook: {e}. Continuing with polling...")
+        try:
+            logger.info("Starting bot with polling...")
+            application.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True
+            )
+        except Exception as e:
+            logger.error(f"Error starting bot: {e}")
+            raise
 
 
 if __name__ == "__main__":

@@ -128,8 +128,10 @@
             --accent-red: #f87171;
             --accent-orange: #fb923c;
             
-            --surface-muted: rgba(255, 255, 255, 0.03);
-            --surface-strong: rgba(129, 140, 248, 0.12);
+            --surface-muted: rgba(255, 255, 255, 0.05);
+            --surface-strong: rgba(129, 140, 248, 0.15);
+            --tariff-card-bg: rgba(26, 26, 37, 0.9);
+            --tariff-card-border: rgba(255, 255, 255, 0.1);
             --gradient-primary: linear-gradient(135deg, rgba(129, 140, 248, 0.15) 0%, rgba(192, 132, 252, 0.1) 100%);
             --gradient-card: linear-gradient(145deg, rgba(129, 140, 248, 0.08) 0%, rgba(34, 211, 238, 0.04) 100%);
         }
@@ -759,6 +761,26 @@
             align-items: center;
             justify-content: space-between;
         }
+        
+        /* Стили для карточки tier (заголовок аккордеона) */
+        .tariff-accordion-header {
+            background: #f5f5f0 !important;
+        }
+        
+        :root[data-theme="dark"] .tariff-accordion-header {
+            background: rgba(26, 26, 37, 0.9) !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+        }
+        
+        :root[data-theme="dark"] .tariff-card {
+            background: rgba(26, 26, 37, 0.9) !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+        }
+        
+        :root[data-theme="dark"] .tariff-card:hover {
+            background: rgba(129, 140, 248, 0.15) !important;
+            border-color: rgba(129, 140, 248, 0.4) !important;
+        }
 
         .tariff-card:hover {
             border-color: rgba(var(--primary-rgb), 0.3);
@@ -1269,6 +1291,12 @@
             overflow-y: auto;
             box-shadow: var(--shadow-lg);
             animation: slideUp 0.3s ease;
+        }
+        
+        :root[data-theme="dark"] .modal-content {
+            background: rgba(26, 26, 37, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
         }
 
         .modal-header {
@@ -1826,6 +1854,13 @@
                         </div>
                         <div class="info-item">
                             <span class="info-label">
+                                <svg class="icon icon-sm"><use href="#icon-server"/></svg>
+                                <span id="devicesLabel">Устройств</span>
+                            </span>
+                            <span id="devicesValue" class="info-value">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">
                                 <svg class="icon icon-sm"><use href="#icon-activity"/></svg>
                                 <span id="trafficLabel">Трафик</span>
                             </span>
@@ -2217,6 +2252,21 @@
         </div>
     </div>
 
+    <!-- Tariff Details Modal -->
+    <div id="tariffDetailsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="tariffDetailsTitle">Детали тарифа</div>
+                <button class="close-btn" onclick="closeTariffDetailsModal()">
+                    <svg class="icon"><use href="#icon-x"/></svg>
+                </button>
+            </div>
+            <div id="tariffDetailsContent" style="padding: 20px 0;">
+                <!-- Контент будет заполнен динамически -->
+            </div>
+        </div>
+    </div>
+
     <!-- Support Modal (opened from Profile) -->
     <div id="supportModal" class="modal">
         <div class="modal-content">
@@ -2309,6 +2359,9 @@
                 expires: 'Истекает:',
                 daysLeft: 'Осталось дней:',
                 traffic: 'Трафик:',
+                devicesLabel: 'Устройств',
+                devices_available: 'доступно',
+                devices_unlimited: 'Безлимит',
                 unlimited: 'Безлимитный',
                 expired: 'Истекла',
                 days: 'дн.',
@@ -2422,6 +2475,9 @@
                 expires: 'Закінчується:',
                 daysLeft: 'Залишилось днів:',
                 traffic: 'Трафік:',
+                devicesLabel: 'Устройств',
+                devices_available: 'доступно',
+                devices_unlimited: 'Безлимит',
                 unlimited: 'Безлімітний',
                 expired: 'Закінчилась',
                 days: 'дн.',
@@ -2535,6 +2591,9 @@
                 expires: 'Expires:',
                 daysLeft: 'Days Left:',
                 traffic: 'Traffic:',
+                devicesLabel: 'Devices',
+                devices_available: 'available',
+                devices_unlimited: 'Unlimited',
                 unlimited: 'Unlimited',
                 expired: 'Expired',
                 days: 'days',
@@ -2648,6 +2707,9 @@
                 expires: '到期:',
                 daysLeft: '剩余天数:',
                 traffic: '流量:',
+                devicesLabel: '设备',
+                devices_available: '可用',
+                devices_unlimited: '无限制',
                 unlimited: '无限制',
                 expired: '已过期',
                 days: '天',
@@ -2838,6 +2900,8 @@
             const daysLeftLabel = document.getElementById('daysLeftLabel');
             if (daysLeftLabel) daysLeftLabel.textContent = t('daysLeft');
             
+            const devicesLabel = document.getElementById('devicesLabel');
+            if (devicesLabel) devicesLabel.textContent = t('devicesLabel');
             const trafficLabel = document.getElementById('trafficLabel');
             if (trafficLabel) trafficLabel.textContent = t('traffic');
             
@@ -2993,7 +3057,8 @@
                             'telegram_stars': '⭐',
                             'monobank': '🏦',
                             'freekassa': '💰',
-                            'robokassa': '🤖'
+                            'robokassa': '🤖',
+                            'kassa_ai': '💳'
                         };
                         select.innerHTML = methods.map(m => {
                             const icon = icons[m.id] || '💳';
@@ -3958,6 +4023,7 @@
             const statusBadge = document.getElementById('subscriptionStatus');
             const expireDateEl = document.getElementById('expireDate');
             const daysLeftEl = document.getElementById('daysLeft');
+            const devicesEl = document.getElementById('devicesValue');
             const trafficEl = document.getElementById('traffic');
             const trafficProgress = document.getElementById('trafficProgress');
             const trafficProgressFill = document.getElementById('trafficProgressFill');
@@ -3975,6 +4041,20 @@
                     const now = new Date();
                     const daysLeft = Math.ceil((expireDate - now) / (1000 * 60 * 60 * 24));
                     daysLeftEl.textContent = daysLeft > 0 ? `${daysLeft} ${t('days')}` : t('expired');
+                }
+
+                // Устройств из тарифа
+                const hwidLimit = userData.hwidDeviceLimit;
+                if (devicesEl) {
+                    if (hwidLimit != null) {
+                        if (hwidLimit === -1 || hwidLimit >= 100) {
+                            devicesEl.textContent = t('devices_unlimited');
+                        } else {
+                            devicesEl.textContent = `${hwidLimit} ${t('devices_available')}`;
+                        }
+                    } else {
+                        devicesEl.textContent = '-';
+                    }
                 }
 
                 const usedTraffic = (userData.usedTrafficBytes ?? userData.traffic_used ?? 0) || 0;
@@ -3996,6 +4076,7 @@
                 statusBadge.className = 'status-badge status-inactive';
                 expireDateEl.textContent = '-';
                 daysLeftEl.textContent = '-';
+                if (devicesEl) devicesEl.textContent = '-';
                 trafficEl.textContent = '-';
                 trafficProgress.classList.add('hidden');
             }
@@ -4447,56 +4528,68 @@
                 const count = list.length;
                 const isOpen = openTariffTier === String(code).toLowerCase();
 
+                // Находим минимальную цену для этого tier
+                const minPrice = Math.min(...list.map(t => t[currencyConfig.field] || 0));
+                
+                // Получаем данные первого тарифа для отображения общих характеристик tier
+                const firstTariff = list[0];
+                const trafficLimit = Number(firstTariff.traffic_limit_bytes) || 0;
+                
+                // Проверяем deviceLimit - ищем во всех тарифах tier, так как может отличаться
+                let deviceLimit = null;
+                for (const tariff of list) {
+                    const limit = tariff.hwid_device_limit;
+                    if (limit !== null && limit !== undefined && limit !== '') {
+                        const numLimit = Number(limit);
+                        if (!isNaN(numLimit) && numLimit > 0) {
+                            deviceLimit = numLimit;
+                            break; // Берем первое найденное значение > 0
+                        }
+                    }
+                }
+                
+                // Форматируем трафик
+                let trafficText = 'Безлимит';
+                if (trafficLimit > 0) {
+                    const trafficGB = (trafficLimit / (1024 ** 3)).toFixed(0);
+                    trafficText = `${trafficGB} GB`;
+                }
+                
+                // Форматируем устройства - если есть значение и оно > 0, показываем число, иначе безлимит
+                let deviceText = '';
+                if (deviceLimit !== null && deviceLimit > 0) {
+                    deviceText = `${deviceLimit} Устройства`;
+                } else {
+                    deviceText = '∞ Безлимит';
+                }
+
                 html += `
                     <div class="tariff-accordion ${isOpen ? 'open' : ''}" data-tier="${safeCode}">
-                        <button class="tariff-accordion-header" onclick="toggleTariffTier('${safeCode}')" type="button">
-                            <div class="tariff-accordion-title">
-                                <svg class="icon icon-sm"><use href="${iconHref}"/></svg>
-                                <span>${safeName}</span>
-                            </div>
-                            <div class="tariff-accordion-meta">
-                                <span>${count}</span>
-                                <svg class="tariff-accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="m6 9 6 6 6-6"></path>
-                                </svg>
+                        <button class="tariff-accordion-header" onclick="openTariffDetailsModal('${safeCode}')" type="button" style="width: 100%; text-align: left; padding: 20px; background: var(--glass-bg); border-radius: var(--radius); border: 1px solid var(--glass-border); cursor: pointer; transition: all 0.25s ease; box-shadow: var(--shadow-xs);">
+                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                                <div>
+                                    <div style="font-size: 20px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px;">
+                                        ${safeName}
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-secondary); margin-bottom: 12px;">
+                                        <span style="color: var(--primary); font-weight: 600;">∞</span>
+                                        <span>${trafficText}</span>
+                                        <span style="margin-left: auto; color: var(--text-muted);">${deviceText}</span>
+                                    </div>
+                                </div>
+                                <div style="border-top: 1px solid var(--glass-border); padding-top: 12px; display: flex; justify-content: space-between; align-items: flex-end;">
+                                    <div>
+                                        <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">от</div>
+                                        <div style="font-size: 24px; font-weight: 700; color: var(--primary); font-family: 'JetBrains Mono', monospace;">
+                                            ${minPrice.toFixed(2)} ${currencyConfig.symbol}
+                                        </div>
+                                    </div>
+                                    <button class="btn" onclick="event.stopPropagation(); openTariffDetailsModal('${safeCode}')" style="background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); padding: 12px 24px; font-weight: 600; cursor: pointer; white-space: nowrap;">
+                                        Купить
+                                    </button>
+                                </div>
                             </div>
                         </button>
-                        <div class="tariff-accordion-body">
-                            ${renderTierFeatures(code)}
-                            <div class="tariff-grid">
-                `;
-
-                html += list.map(tariff => {
-                    const basePrice = tariff[currencyConfig.field] || 0;
-                    const finalPrice = calculateFinalPrice(basePrice);
-                    const tariffId = tariff.id || tariff.tariff_id;
-                    if (!tariffId) {
-                        console.error('Tariff без ID:', tariff);
-                        return '';
-                    }
-                    const bonusHtml = Number(tariff.bonus_days) > 0 
-                        ? `<div style="font-size: 11px; color: var(--accent-primary); margin-top: 2px;">+${tariff.bonus_days} ${t('daysWord')}</div>` 
-                        : '';
-                    const priceHtml = appliedPromo && finalPrice < basePrice
-                        ? `<div class="tariff-price" style="display: flex; flex-direction: column; align-items: flex-end;">
-                            <span style="text-decoration: line-through; font-size: 14px; color: var(--text-secondary); opacity: 0.7;">${basePrice} ${currencyConfig.symbol}</span>
-                            <span style="color: var(--accent-green); font-weight: 700;">${finalPrice.toFixed(2)} ${currencyConfig.symbol}</span>
-                           </div>`
-                        : `<div class="tariff-price">${basePrice} ${currencyConfig.symbol}</div>`;
-                    return `
-                        <div class="tariff-card" onclick="selectTariff(${tariffId})" style="margin-bottom: 8px; cursor: pointer;">
-                            <div class="tariff-info">
-                                <div class="tariff-name">${tariff.name || `${tariff.duration_days} ${t('daysWord')}`}</div>
-                                <div class="tariff-duration">${tariff.duration_days} ${t('daysWord')}${bonusHtml}</div>
-                            </div>
-                            ${priceHtml}
-                        </div>
-                    `;
-                }).join('');
-
-                html += `
-                            </div>
-                        </div>
                     </div>
                 `;
             });
@@ -4676,6 +4769,119 @@
             document.getElementById('tariffsModal').classList.remove('active');
         }
 
+        function openTariffDetailsModal(tierCode) {
+            const modal = document.getElementById('tariffDetailsModal');
+            const content = document.getElementById('tariffDetailsContent');
+            const title = document.getElementById('tariffDetailsTitle');
+            
+            if (!modal || !content) return;
+            
+            // Находим тарифы этого tier
+            const tierTariffs = tariffs.filter(t => getTariffTier(t) === tierCode);
+            if (tierTariffs.length === 0) return;
+            
+            // Получаем название tier
+            const level = tariffLevels.find(l => l.code === tierCode);
+            const tierName = level?.name || tierCode;
+            
+            // Получаем валюту
+            const currency = currentCurrency || userData?.preferred_currency || 'uah';
+            const currencyMap = {
+                'uah': { field: 'price_uah', symbol: '₴' },
+                'rub': { field: 'price_rub', symbol: '₽' },
+                'usd': { field: 'price_usd', symbol: '$' }
+            };
+            const currencyConfig = currencyMap[currency] || currencyMap['uah'];
+            
+            // Получаем функции tier
+            const features = renderTierFeatures(tierCode);
+            
+            // Сортируем тарифы по длительности
+            tierTariffs.sort((a, b) => (a.duration_days || 0) - (b.duration_days || 0));
+            
+            // Создаем HTML для деталей
+            let html = `
+                <div style="margin-bottom: 20px;">
+                    ${features}
+                </div>
+                <div style="margin-bottom: 20px;">
+                    <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">Доступные тарифы:</h3>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+            `;
+            
+            tierTariffs.forEach(tariff => {
+                const price = tariff[currencyConfig.field] || 0;
+                const tariffId = tariff.id || tariff.tariff_id;
+                const bonusDays = Number(tariff.bonus_days) || 0;
+                const days = tariff.duration_days || 0;
+                
+                // Форматируем описание длительности
+                let durationDescription = '';
+                if (days === 14) {
+                    durationDescription = '2 недели';
+                } else if (days === 30) {
+                    durationDescription = '1 месяц';
+                } else if (days === 60) {
+                    durationDescription = '2 месяца';
+                } else if (days === 90) {
+                    durationDescription = '3 месяца';
+                } else if (days === 180) {
+                    durationDescription = '6 месяцев';
+                } else if (days === 360 || days === 365) {
+                    durationDescription = '1 год';
+                } else if (days === 720 || days === 730) {
+                    durationDescription = '2 года';
+                } else if (days >= 7 && days < 30) {
+                    const weeks = Math.round(days / 7);
+                    durationDescription = `${weeks} ${weeks === 1 ? 'неделя' : weeks < 5 ? 'недели' : 'недель'}`;
+                } else if (days >= 30 && days < 365) {
+                    const months = Math.round(days / 30);
+                    durationDescription = `${months} ${months === 1 ? 'месяц' : months < 5 ? 'месяца' : 'месяцев'}`;
+                } else if (days >= 365) {
+                    const years = Math.round(days / 365);
+                    durationDescription = `${years} ${years === 1 ? 'год' : years < 5 ? 'года' : 'лет'}`;
+                }
+                
+                const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                const cardBg = isDark ? 'rgba(26, 26, 37, 0.9)' : 'var(--glass-bg)';
+                const cardBorder = isDark ? 'rgba(255, 255, 255, 0.12)' : 'var(--glass-border)';
+                const cardHoverBg = isDark ? 'rgba(129, 140, 248, 0.15)' : 'var(--surface-strong)';
+                const cardHoverBorder = isDark ? 'rgba(129, 140, 248, 0.4)' : 'rgba(var(--primary-rgb), 0.3)';
+                
+                html += `
+                    <div class="tariff-card" onclick="selectTariff(${tariffId})" style="cursor: pointer; padding: 18px 20px; border-radius: var(--radius); border: 1px solid ${cardBorder}; background: ${cardBg}; transition: all 0.2s ease; margin-bottom: 0;" onmouseover="this.style.background='${cardHoverBg}'; this.style.borderColor='${cardHoverBorder}'; this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-sm)';" onmouseout="this.style.background='${cardBg}'; this.style.borderColor='${cardBorder}'; this.style.transform='translateY(0)'; this.style.boxShadow='none';">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="flex: 1;">
+                                <div style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; line-height: 1.3;">
+                                    ${days} ${t('daysWord')}${bonusDays > 0 ? ` <span style="color: var(--accent-primary); font-size: 14px; font-weight: 600;">+${bonusDays} ${t('daysWord')}</span>` : ''}
+                                </div>
+                                ${durationDescription ? `<div style="font-size: 13px; color: var(--text-secondary); line-height: 1.4;">${durationDescription}</div>` : ''}
+                            </div>
+                            <div style="text-align: right; margin-left: 16px;">
+                                <div style="font-size: 22px; font-weight: 700; color: var(--primary); font-family: 'JetBrains Mono', monospace; line-height: 1.2;">
+                                    ${price.toFixed(2)} ${currencyConfig.symbol}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+            
+            content.innerHTML = html;
+            title.textContent = escapeHtml(tierName);
+            modal.classList.add('active');
+        }
+        
+        function closeTariffDetailsModal() {
+            const modal = document.getElementById('tariffDetailsModal');
+            if (modal) modal.classList.remove('active');
+        }
+        
         function selectTariff(tariffId) {
             console.log('Выбран тариф:', tariffId);
             if (!tariffId) {
@@ -4684,7 +4890,9 @@
             }
             selectedTariffId = tariffId;
             selectedOptionId = null;
-            // Сразу открываем модальное окно оплаты
+            // Закрываем модальное окно деталей
+            closeTariffDetailsModal();
+            // Открываем модальное окно оплаты
             openPaymentModal();
         }
 
@@ -4707,33 +4915,62 @@
                 'btcpayserver': '<svg class="icon"><use href="#icon-shield"/></svg> BTCPayServer',
                 'tribute': '<svg class="icon"><use href="#icon-credit-card"/></svg> Tribute',
                 'robokassa': '<svg class="icon"><use href="#icon-credit-card"/></svg> Robokassa',
-                'freekassa': '<svg class="icon"><use href="#icon-credit-card"/></svg> Freekassa'
+                'freekassa': '<svg class="icon"><use href="#icon-credit-card"/></svg> Freekassa',
+                'kassa_ai': '<svg class="icon"><use href="#icon-credit-card"/></svg> Kassa AI'
             };
 
             let html = '';
             
-            // Добавляем кнопку оплаты с баланса, если баланс достаточен
-            if (userData && userData.balance > 0 && selectedTariffId) {
-                const selectedTariff = tariffs.find(t => (t.id || t.tariff_id) === selectedTariffId);
-                if (selectedTariff) {
-                    const currency = userData.preferred_currency || 'uah';
-                    const priceMap = {
-                        uah: selectedTariff.price_uah,
-                        rub: selectedTariff.price_rub,
-                        usd: selectedTariff.price_usd
-                    };
-                    const tariffPrice = priceMap[currency] || priceMap.uah;
-                    let finalPrice = tariffPrice;
-                    if (appliedPromo) {
-                        if (appliedPromo.type === 'PERCENT') {
-                            finalPrice = tariffPrice * (1 - appliedPromo.value / 100);
-                        } else if (appliedPromo.type === 'FIXED') {
-                            finalPrice = Math.max(0, tariffPrice - appliedPromo.value);
+            // Добавляем кнопку оплаты с баланса для тарифов и опций
+            if (userData && userData.balance > 0 && (selectedTariffId || selectedOptionId)) {
+                const currency = userData.preferred_currency || 'uah';
+                const currencySymbol = currency === 'uah' ? '₴' : currency === 'rub' ? '₽' : '$';
+                let finalPrice = 0;
+                let canAfford = false;
+                
+                if (selectedTariffId) {
+                    // Для тарифов
+                    const selectedTariff = tariffs.find(t => (t.id || t.tariff_id) === selectedTariffId);
+                    if (selectedTariff) {
+                        const priceMap = {
+                            uah: selectedTariff.price_uah,
+                            rub: selectedTariff.price_rub,
+                            usd: selectedTariff.price_usd
+                        };
+                        const tariffPrice = priceMap[currency] || priceMap.uah;
+                        finalPrice = tariffPrice;
+                        if (appliedPromo) {
+                            if (appliedPromo.type === 'PERCENT') {
+                                finalPrice = tariffPrice * (1 - appliedPromo.value / 100);
+                            } else if (appliedPromo.type === 'FIXED') {
+                                finalPrice = Math.max(0, tariffPrice - appliedPromo.value);
+                            }
                         }
+                        // Упрощенная проверка баланса (баланс в USD, конвертируем примерно)
+                        const balanceInCurrency = currency === 'uah' ? userData.balance * 40 : 
+                                                  currency === 'rub' ? userData.balance * 100 : 
+                                                  userData.balance;
+                        canAfford = balanceInCurrency >= finalPrice;
                     }
-                    const canAfford = userData.balance >= finalPrice;
-                    const currencySymbol = currency === 'uah' ? '₴' : currency === 'rub' ? '₽' : '$';
-                    
+                } else if (selectedOptionId) {
+                    // Для опций
+                    const option = [...(purchaseOptions.traffic || []), ...(purchaseOptions.devices || []), ...(purchaseOptions.squad || [])].find(o => o.id === selectedOptionId);
+                    if (option) {
+                        const priceMap = {
+                            uah: option.price_uah || 0,
+                            rub: option.price_rub || 0,
+                            usd: option.price_usd || 0
+                        };
+                        finalPrice = priceMap[currency] || priceMap.uah;
+                        // Упрощенная проверка баланса (баланс в USD, конвертируем примерно)
+                        const balanceInCurrency = currency === 'uah' ? userData.balance * 40 : 
+                                                  currency === 'rub' ? userData.balance * 100 : 
+                                                  userData.balance;
+                        canAfford = balanceInCurrency >= finalPrice;
+                    }
+                }
+                
+                if (finalPrice > 0) {
                     html += `
                         <div class="payment-method" onclick="${canAfford ? "createPayment('balance')" : ''}" style="background: ${canAfford ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.1)'}; color: ${canAfford ? 'var(--accent-green)' : 'var(--accent-red)'}; border-color: ${canAfford ? 'var(--accent-green)' : 'var(--accent-red)'}; ${!canAfford ? 'cursor: not-allowed; opacity: 0.7;' : ''}">
                             <svg class="icon"><use href="#icon-wallet"/></svg>
@@ -4882,9 +5119,7 @@
                     const initData = tg.initData || '';
                     if (!initData) throw new Error('Ошибка авторизации');
 
-                    if (paymentMethod === 'balance') {
-                        throw new Error('Оплата с баланса доступна только для тарифов');
-                    }
+                    // Оплата опций с баланса обрабатывается так же, как и для тарифов
 
                     const payload = {
                         option_id: selectedOptionId,
@@ -4930,7 +5165,7 @@
                 return;
             }
 
-            // Если оплата с баланса, используем специальный endpoint
+            // Если оплата с баланса
             if (paymentMethod === 'balance') {
                 try {
                     const initData = tg.initData || '';
@@ -4954,6 +5189,41 @@
                     const tokenData = await tokenResponse.json();
                     const token = tokenData.token;
                     
+                    // Если это опция, используем endpoint для опций
+                    if (selectedOptionId) {
+                        const currency = currentCurrency || userData?.preferred_currency || 'uah';
+                        const payload = {
+                            option_id: selectedOptionId,
+                            payment_provider: 'balance',
+                            currency: currency
+                        };
+                        if (selectedConfigId) payload.config_id = selectedConfigId;
+                        
+                        const response = await fetch('/api/client/create-option-payment', {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(payload)
+                        });
+                        
+                        const data = await response.json().catch(() => ({}));
+                        
+                        if (response.ok && (data.payment_url === null || data.success === true)) {
+                            // Оплата прошла успешно
+                            tg.showAlert('✅ Опция успешно приобретена!');
+                            closePaymentModal();
+                            selectedOptionId = null;
+                            loadProfile();
+                            purchaseOptionsLoaded = false;
+                            return;
+                        } else {
+                            throw new Error(data?.message || 'Ошибка оплаты опции с баланса');
+                        }
+                    }
+                    
+                    // Если это тариф, используем endpoint для тарифов
                     const payload = {
                         tariff_id: selectedTariffId
                     };

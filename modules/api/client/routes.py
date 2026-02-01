@@ -22,6 +22,8 @@ from modules.auth import get_user_from_token
 from modules.models.user import User
 from modules.models.promo import PromoCode
 from modules.models.referral import ReferralSetting
+from modules.models.user_config import UserConfig
+from modules.models.config_share import ConfigShareToken
 from modules.currency import convert_from_usd, convert_to_usd, parse_iso_datetime, convert_to_usd, parse_iso_datetime
 from modules.models.tariff import Tariff
 from modules.models.payment import Payment, PaymentSetting
@@ -337,13 +339,23 @@ def _normalize_traffic_data(data_dict):
     }
 
 
+def _user_prefs(user):
+    """Язык и валюта пользователя из БД, без null — чтобы после перезагрузки не сбрасывались."""
+    return (
+        (getattr(user, 'preferred_lang', None) or 'ru'),
+        (getattr(user, 'preferred_currency', None) or 'uah'),
+    )
+
+
 @app.route('/api/client/me', methods=['GET'])
 def get_client_me():
     """Получение данных текущего пользователя"""
     user = get_user_from_token()
     if not user:
         return jsonify({"message": "Ошибка аутентификации"}), 401
-    
+
+    preferred_lang, preferred_currency = _user_prefs(user)
+
     # Проверяем блокировку аккаунта
     if getattr(user, 'is_blocked', False):
         return jsonify({
@@ -441,13 +453,13 @@ def get_client_me():
             if isinstance(cached, dict):
                 cached = cached.copy()
                 balance_usd = float(user.balance) if user.balance else 0.0
-                balance_converted = convert_from_usd(balance_usd, user.preferred_currency)
+                balance_converted = convert_from_usd(balance_usd, preferred_currency)
                 # Нормализуем трафик
                 traffic_data = _normalize_traffic_data(cached)
                 cached.update({
                     'referral_code': user.referral_code,
-                    'preferred_lang': user.preferred_lang,
-                    'preferred_currency': user.preferred_currency,
+                    'preferred_lang': preferred_lang,
+                    'preferred_currency': preferred_currency,
                     'telegram_id': user.telegram_id,
                     'telegram_username': user.telegram_username,
                     'balance_usd': balance_usd,
@@ -464,9 +476,67 @@ def get_client_me():
                 "error": "INVALID_UUID_FORMAT"
             }), 400
 
+        # Нет UUID — отдаём только данные из нашей БД, без вызова RemnaWave
+        if not current_uuid or not str(current_uuid).strip():
+            balance_usd = float(user.balance) if user.balance else 0.0
+            basic_data = {
+                'uuid': '',
+                'email': getattr(user, 'email', ''),
+                'referral_code': user.referral_code,
+                'preferred_lang': preferred_lang,
+                'preferred_currency': preferred_currency,
+                'telegram_id': user.telegram_id,
+                'telegram_username': user.telegram_username,
+                'password_hash': user.password_hash if user.password_hash else '',
+                'balance_usd': balance_usd,
+                'balance': convert_from_usd(balance_usd, preferred_currency),
+                'trial_used': getattr(user, 'trial_used', False),
+                'subscription': None,
+                'warning': 'UUID не задан. Обратитесь к администратору.'
+            }
+            return jsonify({"response": basic_data}), 200
+
+        api_url = os.getenv('API_URL') or ''
+        if not api_url or not api_url.startswith('http'):
+            # RemnaWave API не настроен — отдаём кэш или базовые данные
+            cached = cache.get(cache_key)
+            if cached and isinstance(cached, dict):
+                cached = cached.copy()
+                balance_usd = float(user.balance) if user.balance else 0.0
+                traffic_data = _normalize_traffic_data(cached)
+                cached.update({
+                    'referral_code': user.referral_code,
+                    'preferred_lang': preferred_lang,
+                    'preferred_currency': preferred_currency,
+                    'telegram_id': user.telegram_id,
+                    'telegram_username': user.telegram_username,
+                    'balance_usd': balance_usd,
+                    'balance': convert_from_usd(balance_usd, preferred_currency),
+                    'trial_used': getattr(user, 'trial_used', False),
+                    **traffic_data
+                })
+                return jsonify({"response": cached}), 200
+            balance_usd = float(user.balance) if user.balance else 0.0
+            basic_data = {
+                'uuid': current_uuid or '',
+                'email': getattr(user, 'email', ''),
+                'referral_code': user.referral_code,
+                'preferred_lang': preferred_lang,
+                'preferred_currency': preferred_currency,
+                'telegram_id': user.telegram_id,
+                'telegram_username': user.telegram_username,
+                'password_hash': user.password_hash if user.password_hash else '',
+                'balance_usd': balance_usd,
+                'balance': convert_from_usd(balance_usd, preferred_currency),
+                'trial_used': getattr(user, 'trial_used', False),
+                'subscription': None,
+                'warning': 'RemnaWave API не настроен (API_URL).'
+            }
+            return jsonify({"response": basic_data}), 200
+
         resp = requests.get(
-            f"{os.getenv('API_URL')}/api/users/{current_uuid}",
-            headers={"Authorization": f"Bearer {os.getenv('ADMIN_TOKEN')}"},
+            f"{api_url.rstrip('/')}/api/users/{current_uuid}",
+            headers={"Authorization": f"Bearer {os.getenv('ADMIN_TOKEN') or ''}"},
             timeout=10
         )
 
@@ -482,12 +552,12 @@ def get_client_me():
                         traffic_data = _normalize_traffic_data(cached)
                         cached.update({
                             'referral_code': user.referral_code,
-                            'preferred_lang': user.preferred_lang,
-                            'preferred_currency': user.preferred_currency,
+                            'preferred_lang': preferred_lang,
+                            'preferred_currency': preferred_currency,
                             'telegram_id': user.telegram_id,
                             'telegram_username': user.telegram_username,
                             'balance_usd': balance_usd,
-                            'balance': convert_from_usd(balance_usd, user.preferred_currency),
+                            'balance': convert_from_usd(balance_usd, preferred_currency),
                             'trial_used': getattr(user, 'trial_used', False),  # Добавляем информацию об использовании триала
                             **traffic_data  # Добавляем нормализованные данные трафика
                         })
@@ -495,15 +565,15 @@ def get_client_me():
                 
                 # Если кэша нет, возвращаем базовую информацию из нашей БД
                 balance_usd = float(user.balance) if user.balance else 0.0
-                balance_converted = convert_from_usd(balance_usd, user.preferred_currency)
+                balance_converted = convert_from_usd(balance_usd, preferred_currency)
                 
                 # Возвращаем минимальную информацию о пользователе
                 basic_data = {
                     'uuid': current_uuid,
                     'email': user.email,
                     'referral_code': user.referral_code,
-                    'preferred_lang': user.preferred_lang,
-                    'preferred_currency': user.preferred_currency,
+                    'preferred_lang': preferred_lang,
+                    'preferred_currency': preferred_currency,
                     'telegram_id': user.telegram_id,
                     'telegram_username': user.telegram_username,
                     'password_hash': user.password_hash if user.password_hash else '',  # Добавляем password_hash
@@ -515,22 +585,97 @@ def get_client_me():
                 }
                 
                 return jsonify({"response": basic_data}), 200
-            return jsonify({"message": f"Ошибка RemnaWave: {resp.status_code}"}), 500
-
-        response_data = resp.json()
-        data = response_data.get('response', {}) if isinstance(response_data, dict) else response_data
-
-        if isinstance(data, dict):
+            # RemnaWave вернул 5xx или другой код — не отдаём 500 клиенту, отдаём кэш или basic_data
+            print(f"[client/me] RemnaWave returned {resp.status_code}, falling back to cache/basic_data")
+            cached = cache.get(cache_key)
+            if cached and isinstance(cached, dict):
+                cached = cached.copy()
+                balance_usd = float(user.balance) if user.balance else 0.0
+                traffic_data = _normalize_traffic_data(cached)
+                cached.update({
+                    'referral_code': user.referral_code,
+                    'preferred_lang': preferred_lang,
+                    'preferred_currency': preferred_currency,
+                    'telegram_id': user.telegram_id,
+                    'telegram_username': user.telegram_username,
+                    'balance_usd': balance_usd,
+                    'balance': convert_from_usd(balance_usd, preferred_currency),
+                    'trial_used': getattr(user, 'trial_used', False),
+                    **traffic_data
+                })
+                return jsonify({"response": cached}), 200
             balance_usd = float(user.balance) if user.balance else 0.0
-            balance_converted = convert_from_usd(balance_usd, user.preferred_currency)
+            basic_data = {
+                'uuid': current_uuid,
+                'email': user.email,
+                'referral_code': user.referral_code,
+                'preferred_lang': preferred_lang,
+                'preferred_currency': preferred_currency,
+                'telegram_id': user.telegram_id,
+                'telegram_username': user.telegram_username,
+                'password_hash': user.password_hash if user.password_hash else '',
+                'balance_usd': balance_usd,
+                'balance': convert_from_usd(balance_usd, preferred_currency),
+                'trial_used': getattr(user, 'trial_used', False),
+                'subscription': None,
+                'warning': f'RemnaWave API вернул {resp.status_code}. Данные из кэша панели.'
+            }
+            return jsonify({"response": basic_data}), 200
+
+        try:
+            response_data = resp.json()
+        except (ValueError, requests.RequestException) as e:
+            print(f"[client/me] RemnaWave response not JSON: {e}")
+            cached = cache.get(cache_key)
+            if cached and isinstance(cached, dict):
+                cached = cached.copy()
+                balance_usd = float(user.balance) if user.balance else 0.0
+                traffic_data = _normalize_traffic_data(cached)
+                cached.update({
+                    'referral_code': user.referral_code,
+                    'preferred_lang': preferred_lang,
+                    'preferred_currency': preferred_currency,
+                    'telegram_id': user.telegram_id,
+                    'telegram_username': user.telegram_username,
+                    'balance_usd': balance_usd,
+                    'balance': convert_from_usd(balance_usd, preferred_currency),
+                    'trial_used': getattr(user, 'trial_used', False),
+                    **traffic_data
+                })
+                return jsonify({"response": cached}), 200
+            balance_usd = float(user.balance) if user.balance else 0.0
+            basic_data = {
+                'uuid': current_uuid,
+                'email': user.email,
+                'referral_code': user.referral_code,
+                'preferred_lang': preferred_lang,
+                'preferred_currency': preferred_currency,
+                'telegram_id': user.telegram_id,
+                'telegram_username': user.telegram_username,
+                'password_hash': user.password_hash if user.password_hash else '',
+                'balance_usd': balance_usd,
+                'balance': convert_from_usd(balance_usd, preferred_currency),
+                'trial_used': getattr(user, 'trial_used', False),
+                'subscription': None,
+                'warning': 'Не удалось получить данные из RemnaWave.'
+            }
+            return jsonify({"response": basic_data}), 200
+
+        data = response_data.get('response', {}) if isinstance(response_data, dict) else response_data
+        if not isinstance(data, dict):
+            data = {}
+
+        if data is not None:
+            balance_usd = float(user.balance) if user.balance else 0.0
+            balance_converted = convert_from_usd(balance_usd, preferred_currency)
             
             # Нормализуем трафик
             traffic_data = _normalize_traffic_data(data)
             
             data.update({
                 'referral_code': user.referral_code,
-                'preferred_lang': user.preferred_lang,
-                'preferred_currency': user.preferred_currency,
+                'preferred_lang': preferred_lang,
+                'preferred_currency': preferred_currency,
                 'telegram_id': user.telegram_id,
                 'telegram_username': user.telegram_username,
                 'password_hash': user.password_hash if user.password_hash else '',  # Добавляем password_hash
@@ -553,24 +698,72 @@ def get_client_me():
                 traffic_data = _normalize_traffic_data(cached)
                 cached.update({
                     'referral_code': user.referral_code,
-                    'preferred_lang': user.preferred_lang,
-                    'preferred_currency': user.preferred_currency,
+                    'preferred_lang': preferred_lang,
+                    'preferred_currency': preferred_currency,
                     'telegram_id': user.telegram_id,
                     'telegram_username': user.telegram_username,
                     'password_hash': user.password_hash if user.password_hash else '',  # Добавляем password_hash
                     'balance_usd': balance_usd,
-                    'balance': convert_from_usd(balance_usd, user.preferred_currency),
+                    'balance': convert_from_usd(balance_usd, preferred_currency),
                     'trial_used': getattr(user, 'trial_used', False),  # Добавляем информацию об использовании триала
                     **traffic_data  # Добавляем нормализованные данные трафика
                 })
             return jsonify({"response": cached}), 200
-        return jsonify({"message": f"Ошибка подключения: {str(e)}"}), 500
+        # Нет кэша — отдаём basic_data, не 500
+        print(f"[client/me] RequestException (no cache): {e}")
+        balance_usd = float(user.balance) if user.balance else 0.0
+        basic_data = {
+            'uuid': current_uuid or '',
+            'email': getattr(user, 'email', ''),
+            'referral_code': user.referral_code,
+            'preferred_lang': preferred_lang,
+            'preferred_currency': preferred_currency,
+            'telegram_id': user.telegram_id,
+            'telegram_username': user.telegram_username,
+            'password_hash': user.password_hash if user.password_hash else '',
+            'balance_usd': balance_usd,
+            'balance': convert_from_usd(balance_usd, preferred_currency),
+            'trial_used': getattr(user, 'trial_used', False),
+            'subscription': None,
+            'warning': f'Ошибка подключения к RemnaWave: {str(e)[:80]}. Данные из панели.'
+        }
+        return jsonify({"response": basic_data}), 200
     except Exception as e:
         print(f"Error in get_client_me: {e}")
         cached = cache.get(cache_key)
-        if cached:
+        if cached and isinstance(cached, dict):
+            cached = cached.copy()
+            balance_usd = float(user.balance) if user.balance else 0.0
+            traffic_data = _normalize_traffic_data(cached)
+            cached.update({
+                'referral_code': user.referral_code,
+                'preferred_lang': preferred_lang,
+                'preferred_currency': preferred_currency,
+                'telegram_id': user.telegram_id,
+                'telegram_username': user.telegram_username,
+                'balance_usd': balance_usd,
+                'balance': convert_from_usd(balance_usd, preferred_currency),
+                'trial_used': getattr(user, 'trial_used', False),
+                **traffic_data
+            })
             return jsonify({"response": cached}), 200
-        return jsonify({"message": "Internal Error"}), 500
+        balance_usd = float(user.balance) if user.balance else 0.0
+        basic_data = {
+            'uuid': current_uuid or '',
+            'email': getattr(user, 'email', ''),
+            'referral_code': user.referral_code,
+            'preferred_lang': preferred_lang,
+            'preferred_currency': preferred_currency,
+            'telegram_id': user.telegram_id,
+            'telegram_username': user.telegram_username,
+            'password_hash': user.password_hash if user.password_hash else '',
+            'balance_usd': balance_usd,
+            'balance': convert_from_usd(balance_usd, preferred_currency),
+            'trial_used': getattr(user, 'trial_used', False),
+            'subscription': None,
+            'warning': 'Временная ошибка. Настройки языка и валюты сохранены.'
+        }
+        return jsonify({"response": basic_data}), 200
 
 
 @app.route('/api/client/configs', methods=['GET'])
@@ -696,6 +889,67 @@ def create_option_payment():
         import uuid
         order_id = f"OPT-{uuid.uuid4().hex[:12].upper()}"
 
+        # Если оплата с баланса, обрабатываем сразу
+        if payment_provider == "balance":
+            from modules.currency import convert_to_usd, convert_from_usd
+            current_balance_usd = float(user.balance) if user.balance else 0.0
+            final_amount_usd = convert_to_usd(amount, currency_code)
+            
+            if current_balance_usd < final_amount_usd:
+                current_balance_display = convert_from_usd(current_balance_usd, currency)
+                return jsonify({
+                    "message": f"Недостаточно средств на балансе. Требуется: {amount:.2f} {currency_code}, доступно: {current_balance_display:.2f} {currency_code}"
+                }), 400
+            
+            # Списываем средства с баланса
+            user.balance = current_balance_usd - final_amount_usd
+            
+            payment_db = Payment(
+                order_id=order_id,
+                user_id=user.id,
+                tariff_id=None,
+                amount=amount,
+                currency=currency_code,
+                payment_provider=payment_provider,
+                promo_code_id=None,
+                status="PENDING"
+            )
+            payment_db.description = f"OPTION:{option.id}"
+            
+            # опционально - к какому конфигу применить
+            try:
+                if config_id:
+                    payment_db.user_config_id = int(config_id)
+            except Exception:
+                pass
+            
+            db.session.add(payment_db)
+            db.session.commit()
+            
+            # Обрабатываем покупку опции
+            from modules.api.webhooks.routes import process_option_purchase
+            success = process_option_purchase(payment_db, user)
+            
+            if success:
+                payment_db.status = "PAID"
+                db.session.commit()
+                # Обновляем баланс пользователя в ответе
+                db.session.refresh(user)
+                return jsonify({
+                    "payment_url": None,
+                    "payment_system_id": None,
+                    "order_id": order_id,
+                    "success": True,
+                    "message": "Опция успешно приобретена",
+                    "balance": float(user.balance) if user.balance else 0.0
+                }), 200
+            else:
+                # Возвращаем средства, если обработка не удалась
+                user.balance = current_balance_usd
+                db.session.rollback()
+                return jsonify({"message": "Ошибка обработки покупки опции"}), 500
+
+        # Для других методов оплаты создаем обычный платеж
         payment_db = Payment(
             order_id=order_id,
             user_id=user.id,
@@ -855,34 +1109,43 @@ def activate_trial():
 
 @app.route('/api/client/settings', methods=['POST'])
 def set_settings():
-    """Настройки клиента"""
+    """Настройки клиента — язык и валюта сохраняются в БД и не сбрасываются при перезагрузке."""
     user = get_user_from_token()
     if not user:
         return jsonify({"message": "Ошибка аутентификации"}), 401
 
+    data = request.json
+    if data is None:
+        return jsonify({"message": "Тело запроса должно быть JSON (Content-Type: application/json)"}), 400
+
     try:
-        data = request.json
-        # Поддерживаем оба варианта: currency и preferred_currency для обратной совместимости
-        if 'lang' in data:
-            user.preferred_lang = data.get('lang')
-        elif 'preferred_lang' in data:
-            user.preferred_lang = data.get('preferred_lang')
-        
-        if 'currency' in data:
-            currency = data.get('currency')
-            if currency in ['uah', 'rub', 'usd']:
-                user.preferred_currency = currency
-        elif 'preferred_currency' in data:
-            currency = data.get('preferred_currency')
-            if currency in ['uah', 'rub', 'usd']:
-                user.preferred_currency = currency
-        
-        db.session.commit()
-        # Очищаем кэш пользователя при изменении настроек
-        cache.delete(f'live_data_{user.remnawave_uuid}')
-        cache.delete('all_live_users_map')
-        return jsonify({"message": "Settings updated", "preferred_currency": user.preferred_currency}), 200
+        updated = False
+        valid_langs = ('ru', 'ua', 'en', 'cn')
+        valid_currencies = ('uah', 'rub', 'usd')
+
+        lang_val = data.get('lang') or data.get('preferred_lang')
+        if lang_val is not None and str(lang_val).strip() and str(lang_val).lower() in valid_langs:
+            user.preferred_lang = str(lang_val).lower()
+            updated = True
+
+        curr_val = data.get('currency') or data.get('preferred_currency')
+        if curr_val is not None and str(curr_val).strip() and str(curr_val).lower() in valid_currencies:
+            user.preferred_currency = str(curr_val).lower()
+            updated = True
+
+        if updated:
+            db.session.commit()
+            cache.delete(f'live_data_{user.remnawave_uuid}')
+            cache.delete('all_live_users_map')
+            print(f"[client/settings] Saved user_id={user.id} preferred_lang={user.preferred_lang} preferred_currency={user.preferred_currency}")
+
+        return jsonify({
+            "message": "Settings updated",
+            "preferred_lang": user.preferred_lang,
+            "preferred_currency": user.preferred_currency
+        }), 200
     except Exception as e:
+        db.session.rollback()
         import traceback
         traceback.print_exc()
         return jsonify({"message": "Failed to update settings", "error": str(e)}), 500
@@ -1555,6 +1818,22 @@ def create_payment():
                 
                 payment_url = f"https://pay.freekassa.ru/?m={merchant_id}&oa={float(amount)}&o={order_id}&s={sign}&currency={freekassa_currency}"
                 payment_system_id = order_id
+
+            elif payment_provider == 'kassa_ai':
+                from modules.api.payments import create_payment as create_payment_provider
+                from modules.api.payments.base import get_callback_url
+                payment_url, payment_system_id = create_payment_provider(
+                    provider='kassa_ai',
+                    amount=float(amount),
+                    currency=cp_currency,
+                    order_id=order_id,
+                    user_email=user.email if user else None,
+                    ip=request.remote_addr,
+                    notification_url=get_callback_url('kassa_ai'),
+                )
+                if not payment_url:
+                    error_msg = payment_system_id or "Kassa AI: не удалось создать платёж"
+                    return jsonify({"message": error_msg}), 500
             
             elif payment_provider == 'robokassa':
                 robokassa_login = decrypt_key(getattr(s, 'robokassa_merchant_login', None)) if s else None
@@ -2026,8 +2305,23 @@ def create_payment():
                 
                 payment_url = f"https://pay.freekassa.ru/?m={merchant_id}&oa={amount}&o={order_id}&s={sign}&currency={currency}"
                 payment_system_id = order_id
+
+            elif payment_provider == 'kassa_ai':
+                from modules.api.payments import create_payment as create_payment_provider
+                from modules.api.payments.base import get_callback_url
+                payment_url, payment_system_id = create_payment_provider(
+                    provider='kassa_ai',
+                    amount=float(amount),
+                    currency=currency,
+                    order_id=order_id,
+                    user_email=user.email if user else None,
+                    ip=request.remote_addr,
+                    notification_url=get_callback_url('kassa_ai'),
+                )
+                if not payment_url:
+                    error_msg = payment_system_id or "Kassa AI: не удалось создать платёж"
+                    return jsonify({"message": error_msg}), 500
             
-            # Robokassa
             elif payment_provider == 'robokassa':
                 robokassa_login = decrypt_key(getattr(s, 'robokassa_merchant_login', None)) if s else None
                 robokassa_password1 = decrypt_key(getattr(s, 'robokassa_password1', None)) if s else None
@@ -2685,4 +2979,178 @@ def get_subscription_config():
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({"message": "Internal Error"}), 500
+
+
+# ============================================================================
+# CONFIG SHARING (Обмен конфигами через inline режим)
+# ============================================================================
+
+@app.route('/api/client/configs/<int:config_id>/share-token', methods=['POST'])
+def create_config_share_token(config_id):
+    """Создать токен для обмена конфигом"""
+    user = get_user_from_token()
+    if not user:
+        return jsonify({"message": "Auth Error"}), 401
+    
+    try:
+        # Проверяем, что конфиг принадлежит пользователю
+        config = UserConfig.query.filter_by(id=config_id, user_id=user.id).first()
+        if not config:
+            return jsonify({"message": "Config not found"}), 404
+        
+        data = request.get_json(silent=True) or {}
+        expires_hours = data.get('expires_hours')  # None = бессрочный
+        max_uses = data.get('max_uses', 1)
+        
+        # Создаем токен
+        token = ConfigShareToken.generate_token()
+        expires_at = None
+        if expires_hours:
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_hours)
+        
+        share_token = ConfigShareToken(
+            config_id=config_id,
+            owner_id=user.id,
+            token=token,
+            expires_at=expires_at,
+            max_uses=max_uses
+        )
+        
+        db.session.add(share_token)
+        db.session.commit()
+        
+        return jsonify({
+            "token": token,
+            "expires_at": expires_at.isoformat() if expires_at else None,
+            "max_uses": max_uses
+        }), 200
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        db.session.rollback()
+        return jsonify({"message": "Internal Error"}), 500
+
+
+@app.route('/api/public/config-share/<token>', methods=['GET'])
+def get_config_by_share_token(token):
+    """Получить информацию о конфиге по токену (для inline режима)"""
+    try:
+        share_token = ConfigShareToken.query.filter_by(token=token).first()
+        if not share_token:
+            return jsonify({"message": "Token not found"}), 404
+        
+        if not share_token.is_valid():
+            return jsonify({"message": "Token expired or invalid"}), 410
+        
+        config = share_token.config
+        owner = share_token.owner
+        
+        # Получаем данные конфига из RemnaWave
+        API_URL = os.getenv('API_URL')
+        headers, cookies = get_remnawave_headers()
+        
+        subscription_url = None
+        expire_at = None
+        is_active = False
+        
+        if API_URL:
+            try:
+                resp = requests.get(
+                    f"{API_URL}/api/users/{config.remnawave_uuid}",
+                    headers=headers,
+                    cookies=cookies,
+                    timeout=10
+                )
+                if resp.status_code == 200:
+                    payload = resp.json() or {}
+                    data = payload.get('response', payload) if isinstance(payload, dict) else None
+                    if isinstance(data, dict):
+                        subscription_url = data.get('subscriptionUrl')
+                        expire_at = data.get('expireAt')
+                        
+                        if expire_at and isinstance(expire_at, str):
+                            try:
+                                exp_dt = datetime.fromisoformat(expire_at.replace('Z', '+00:00'))
+                                if exp_dt.tzinfo is None:
+                                    exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                                is_active = exp_dt > datetime.now(timezone.utc)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+        
+        return jsonify({
+            "config_id": config.id,
+            "config_name": config.config_name or f"Конфиг {config.id}",
+            "owner_username": owner.telegram_username or f"User {owner.id}",
+            "subscription_url": subscription_url,
+            "expire_at": expire_at,
+            "is_active": is_active,
+            "token": token
+        }), 200
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"message": "Internal Error"}), 500
+
+
+@app.route('/api/client/configs/share/<token>/accept', methods=['POST'])
+def accept_shared_config(token):
+    """Принять и скопировать конфиг по токену"""
+    user = get_user_from_token()
+    if not user:
+        return jsonify({"message": "Auth Error"}), 401
+    
+    try:
+        share_token = ConfigShareToken.query.filter_by(token=token).first()
+        if not share_token:
+            return jsonify({"message": "Token not found"}), 404
+        
+        if not share_token.is_valid():
+            return jsonify({"message": "Token expired or invalid"}), 410
+        
+        # Проверяем, что пользователь не пытается скопировать свой же конфиг
+        if share_token.owner_id == user.id:
+            return jsonify({"message": "Cannot share config to yourself"}), 400
+        
+        source_config = share_token.config
+        
+        # Проверяем, нет ли уже такого конфига у пользователя
+        existing_config = UserConfig.query.filter_by(
+            user_id=user.id,
+            remnawave_uuid=source_config.remnawave_uuid
+        ).first()
+        
+        if existing_config:
+            # Используем токен, но не создаем дубликат
+            share_token.use()
+            return jsonify({
+                "message": "Config already exists",
+                "config_id": existing_config.id
+            }), 200
+        
+        # Создаем новый конфиг для пользователя
+        new_config = UserConfig(
+            user_id=user.id,
+            remnawave_uuid=source_config.remnawave_uuid,
+            config_name=f"{source_config.config_name or 'Конфиг'} (от {share_token.owner.telegram_username or 'пользователя'})",
+            is_primary=False
+        )
+        
+        db.session.add(new_config)
+        share_token.use()
+        db.session.commit()
+        
+        return jsonify({
+            "message": "Config shared successfully",
+            "config_id": new_config.id
+        }), 200
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        db.session.rollback()
         return jsonify({"message": "Internal Error"}), 500

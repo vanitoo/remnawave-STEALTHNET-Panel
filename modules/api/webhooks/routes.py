@@ -7,6 +7,7 @@ API вебхуков платежных систем
 - POST /api/webhook/telegram - Telegram Stars webhook
 - POST /api/webhook/telegram-stars - Telegram Stars webhook (alt)
 - POST /api/webhook/freekassa - FreeKassa webhook
+- POST /api/webhook/kassa_ai - Kassa AI (Freekassa api.fk.life) webhook
 - POST /api/webhook/robokassa - Robokassa webhook
 """
 
@@ -1214,6 +1215,39 @@ def freekassa_webhook():
         
     except Exception as e:
         print(f"[FREEKASSA] Error: {e}")
+        return "NO", 500
+
+
+@app.route('/api/webhook/kassa_ai', methods=['POST', 'GET'])
+def kassa_ai_webhook():
+    """Kassa AI (Freekassa api.fk.life) webhook — подпись MD5: MERCHANT_ID:AMOUNT:WEBHOOK_SECRET:MERCHANT_ORDER_ID"""
+    try:
+        from modules.api.payments.kassa_ai import verify_kassa_ai_webhook
+        order_id, err = verify_kassa_ai_webhook(request)
+        if err:
+            print(f"[KASSA_AI] Webhook verify failed: {err}")
+            return "NO", 400 if err in ("missing_params", "wrong_sign") else 403
+        data = request.values.to_dict()
+        print(f"[KASSA_AI] Received: order_id={order_id}, data={data}")
+        payment = Payment.query.filter_by(order_id=order_id).first()
+        if not payment:
+            return "NO", 404
+        if payment.status != 'PAID':
+            payment.status = 'PAID'
+            payment.payment_system_id = data.get("intid") or data.get("MERCHANT_ORDER_ID") or order_id
+            db.session.commit()
+            user = User.query.get(payment.user_id)
+            tariff = Tariff.query.get(payment.tariff_id)
+            is_option = bool(getattr(payment, 'description', None)) and str(payment.description).startswith("OPTION:")
+            if user and is_option:
+                process_option_purchase(payment, user)
+            elif user and tariff:
+                process_successful_payment(payment, user, tariff)
+        return "YES", 200
+    except Exception as e:
+        print(f"[KASSA_AI] Error: {e}")
+        import traceback
+        traceback.print_exc()
         return "NO", 500
 
 

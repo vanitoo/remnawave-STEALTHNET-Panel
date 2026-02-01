@@ -2070,36 +2070,71 @@ def system_settings(current_admin):
     # POST - обновление
     try:
         data = request.json
-        if 'default_language' in data:
-            if data['default_language'] not in ['ru', 'ua', 'cn', 'en']:
-                return jsonify({"message": "Invalid language"}), 400
-            s.default_language = data['default_language']
-        if 'default_currency' in data:
-            if data['default_currency'] not in ['uah', 'rub', 'usd']:
-                return jsonify({"message": "Invalid currency"}), 400
-            s.default_currency = data['default_currency']
+        if data is None:
+            return jsonify({"message": "Request body is required (JSON)"}), 400
+        # Убеждаемся, что запись есть в БД (иначе commit ничего не сохранит)
+        db.session.add(s)
+        db.session.flush()
+        if 'default_language' in data and data['default_language'] not in (None, ''):
+            val = data['default_language']
+            if val not in ['ru', 'ua', 'cn', 'en']:
+                msg = "Invalid language"
+                print(f"POST /api/admin/system-settings 400: {msg}")
+                return jsonify({"message": msg}), 400
+            s.default_language = val
+        if 'default_currency' in data and data['default_currency'] not in (None, ''):
+            val = data['default_currency']
+            if val not in ['uah', 'rub', 'usd']:
+                msg = "Invalid currency"
+                print(f"POST /api/admin/system-settings 400: {msg}")
+                return jsonify({"message": msg}), 400
+            s.default_currency = val
         if 'show_language_currency_switcher' in data:
             s.show_language_currency_switcher = bool(data['show_language_currency_switcher'])
         if 'active_languages' in data:
-            # Валидация: должен быть массив строк
-            if isinstance(data['active_languages'], list):
-                valid_langs = ['ru', 'ua', 'en', 'cn']
-                filtered_langs = [lang for lang in data['active_languages'] if lang in valid_langs]
-                if len(filtered_langs) == 0:
-                    return jsonify({"message": "At least one language must be active"}), 400
-                s.active_languages = json.dumps(filtered_langs)
+            raw = data['active_languages']
+            if raw is None:
+                pass  # не меняем
             else:
-                return jsonify({"message": "active_languages must be an array"}), 400
+                if isinstance(raw, str):
+                    try:
+                        raw = json.loads(raw)
+                    except Exception:
+                        raw = None
+                if isinstance(raw, list):
+                    valid_langs = ['ru', 'ua', 'en', 'cn']
+                    filtered_langs = [lang for lang in raw if lang in valid_langs]
+                    if len(filtered_langs) == 0:
+                        msg = "At least one language must be active"
+                        print(f"POST /api/admin/system-settings 400: {msg}")
+                        return jsonify({"message": msg}), 400
+                    s.active_languages = json.dumps(filtered_langs)
+                elif raw is not None:
+                    msg = "active_languages must be an array"
+                    print(f"POST /api/admin/system-settings 400: {msg} (got {type(raw).__name__})")
+                    return jsonify({"message": msg}), 400
         if 'active_currencies' in data:
-            # Валидация: должен быть массив строк
-            if isinstance(data['active_currencies'], list):
-                valid_currs = ['uah', 'rub', 'usd']
-                filtered_currs = [curr for curr in data['active_currencies'] if curr in valid_currs]
-                if len(filtered_currs) == 0:
-                    return jsonify({"message": "At least one currency must be active"}), 400
-                s.active_currencies = json.dumps(filtered_currs)
+            raw = data['active_currencies']
+            if raw is None:
+                pass
             else:
-                return jsonify({"message": "active_currencies must be an array"}), 400
+                if isinstance(raw, str):
+                    try:
+                        raw = json.loads(raw)
+                    except Exception:
+                        raw = None
+                if isinstance(raw, list):
+                    valid_currs = ['uah', 'rub', 'usd']
+                    filtered_currs = [curr for curr in raw if curr in valid_currs]
+                    if len(filtered_currs) == 0:
+                        msg = "At least one currency must be active"
+                        print(f"POST /api/admin/system-settings 400: {msg}")
+                        return jsonify({"message": msg}), 400
+                    s.active_currencies = json.dumps(filtered_currs)
+                elif raw is not None:
+                    msg = "active_currencies must be an array"
+                    print(f"POST /api/admin/system-settings 400: {msg} (got {type(raw).__name__})")
+                    return jsonify({"message": msg}), 400
         
         # Обработка цветов темы
         def is_valid_hex(color):
@@ -2130,6 +2165,7 @@ def system_settings(current_admin):
             s.theme_text_secondary_dark = data['theme_text_secondary_dark']
         
         db.session.commit()
+        print(f"[admin/system-settings] Saved default_language={s.default_language} default_currency={s.default_currency}")
         return jsonify({"message": "System settings updated successfully"}), 200
 
     except Exception as e:
@@ -3293,9 +3329,19 @@ def send_telegram_message(bot_token, chat_id, text, photo_url=None, photo_file=N
     """
     Отправить сообщение в Telegram через Bot API
     Если указано фото, отправляет фото с caption (одно сообщение)
+    Добавляет кнопку "В главное меню" для рассылок
     """
     import requests
+    import json
     try:
+        # Добавляем кнопку "В главное меню" для рассылок
+        reply_markup = {
+            "inline_keyboard": [[{
+                "text": "🏠 В главное меню",
+                "callback_data": "clear_and_main_menu"
+            }]]
+        }
+        
         if photo_url or photo_file:
             # Отправляем фото с caption
             url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
@@ -3309,7 +3355,8 @@ def send_telegram_message(bot_token, chat_id, text, photo_url=None, photo_file=N
                 data = {
                     "chat_id": chat_id,
                     "caption": caption,
-                    "parse_mode": "HTML"
+                    "parse_mode": "HTML",
+                    "reply_markup": json.dumps(reply_markup)
                 }
                 response = requests.post(url, files=files, data=data, timeout=30)
             elif photo_url:
@@ -3318,7 +3365,8 @@ def send_telegram_message(bot_token, chat_id, text, photo_url=None, photo_file=N
                     "chat_id": chat_id,
                     "photo": photo_url,
                     "caption": caption,
-                    "parse_mode": "HTML"
+                    "parse_mode": "HTML",
+                    "reply_markup": reply_markup
                 }
                 response = requests.post(url, json=payload, timeout=30)
             else:
@@ -3329,7 +3377,8 @@ def send_telegram_message(bot_token, chat_id, text, photo_url=None, photo_file=N
             payload = {
                 "chat_id": chat_id,
                 "text": text,
-                "parse_mode": "HTML"
+                "parse_mode": "HTML",
+                "reply_markup": reply_markup
             }
             response = requests.post(url, json=payload, timeout=10)
         
@@ -3816,7 +3865,7 @@ def auto_broadcast_messages(current_admin):
                 else:
                     # Создаем новое
                     default_texts = {
-                        'subscription_expiring_3days': 'Подписка заканчивается через 3 дня, не забудьте продлить',
+                        'subscription_expiring_3days': 'Подписка заканчивается через {days} {days_word}, не забудьте продлить',
                         'trial_expiring': 'Тестовый период заканчивается, не желаете купить подписку?',
                         'no_subscription': '🔔 Вы ещё не оформили VPN? Не теряйте время — подключитесь сейчас и защитите свой трафик!',
                         'trial_not_used': '🚀 Бесплатная пробная подписка ждёт вас!\n\nМы заметили, что вы ещё не воспользовались пробным доступом. Активируйте его прямо сейчас и оцените все преимущества VPN! 🔥',

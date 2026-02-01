@@ -51,6 +51,7 @@ from modules.models.auto_broadcast import AutoBroadcastMessage, AutoBroadcastSet
 from modules.models.casino import CasinoGame, CasinoStats
 from modules.models.trial import TrialSettings
 from modules.models.user_config import UserConfig
+from modules.models.config_share import ConfigShareToken
 from modules.models.option import PurchaseOption
 
 # ============================================================================
@@ -547,7 +548,7 @@ if __name__ == '__main__':
             
             default_messages = {
                 'subscription_expiring_3days': {
-                    'text': 'Подписка заканчивается через 3 дня, не забудьте продлить',
+                    'text': 'Подписка заканчивается через {days} {days_word}, не забудьте продлить',
                     'enabled': True,
                     'bot_type': 'both'
                 },

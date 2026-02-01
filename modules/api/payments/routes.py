@@ -1,6 +1,7 @@
 """
 API эндпоинты для платежей
 """
+import os
 from flask import jsonify, request
 from modules.core import get_app, get_db, get_fernet
 from modules.auth import admin_required, get_user_from_token
@@ -284,94 +285,103 @@ def available_payment_methods():
     
     try:
         s = PaymentSetting.query.first()
-        if not s:
-            return jsonify({"available_methods": []}), 200
-        
         available = []
         
-        # CrystalPay - нужны api_key и api_secret
-        crystalpay_key = decrypt_key(s.crystalpay_api_key) if s.crystalpay_api_key else None
-        crystalpay_secret = decrypt_key(s.crystalpay_api_secret) if s.crystalpay_api_secret else None
-        if crystalpay_key and crystalpay_secret and crystalpay_key != "DECRYPTION_ERROR" and crystalpay_secret != "DECRYPTION_ERROR":
-            available.append('crystalpay')
-        
-        # Heleket - нужен api_key
-        heleket_key = decrypt_key(s.heleket_api_key) if s.heleket_api_key else None
-        if heleket_key and heleket_key != "DECRYPTION_ERROR":
-            available.append('heleket')
-        
-        # YooKassa - нужны shop_id и secret_key
-        yookassa_shop = decrypt_key(s.yookassa_shop_id) if s.yookassa_shop_id else None
-        yookassa_secret = decrypt_key(s.yookassa_secret_key) if s.yookassa_secret_key else None
-        if yookassa_shop and yookassa_secret and yookassa_shop != "DECRYPTION_ERROR" and yookassa_secret != "DECRYPTION_ERROR":
-            available.append('yookassa')
+        # Способы из админки (PaymentSetting) — только если запись есть
+        if s:
+            # CrystalPay - нужны api_key и api_secret
+            crystalpay_key = decrypt_key(s.crystalpay_api_key) if s.crystalpay_api_key else None
+            crystalpay_secret = decrypt_key(s.crystalpay_api_secret) if s.crystalpay_api_secret else None
+            if crystalpay_key and crystalpay_secret and crystalpay_key != "DECRYPTION_ERROR" and crystalpay_secret != "DECRYPTION_ERROR":
+                available.append('crystalpay')
+            
+            # Heleket - нужен api_key
+            heleket_key = decrypt_key(s.heleket_api_key) if s.heleket_api_key else None
+            if heleket_key and heleket_key != "DECRYPTION_ERROR":
+                available.append('heleket')
+            
+            # YooKassa - нужны shop_id и secret_key
+            yookassa_shop = decrypt_key(s.yookassa_shop_id) if s.yookassa_shop_id else None
+            yookassa_secret = decrypt_key(s.yookassa_secret_key) if s.yookassa_secret_key else None
+            if yookassa_shop and yookassa_secret and yookassa_shop != "DECRYPTION_ERROR" and yookassa_secret != "DECRYPTION_ERROR":
+                available.append('yookassa')
 
-        # YooMoney - нужны receiver и notification_secret
-        yoomoney_receiver = decrypt_key(getattr(s, 'yoomoney_receiver', None)) if getattr(s, 'yoomoney_receiver', None) else None
-        yoomoney_secret = decrypt_key(getattr(s, 'yoomoney_notification_secret', None)) if getattr(s, 'yoomoney_notification_secret', None) else None
-        if yoomoney_receiver and yoomoney_secret and yoomoney_receiver != "DECRYPTION_ERROR" and yoomoney_secret != "DECRYPTION_ERROR":
-            available.append('yoomoney')
+            # YooMoney - нужны receiver и notification_secret
+            yoomoney_receiver = decrypt_key(getattr(s, 'yoomoney_receiver', None)) if getattr(s, 'yoomoney_receiver', None) else None
+            yoomoney_secret = decrypt_key(getattr(s, 'yoomoney_notification_secret', None)) if getattr(s, 'yoomoney_notification_secret', None) else None
+            if yoomoney_receiver and yoomoney_secret and yoomoney_receiver != "DECRYPTION_ERROR" and yoomoney_secret != "DECRYPTION_ERROR":
+                available.append('yoomoney')
+            
+            # Platega - нужны api_key и merchant_id
+            platega_key = decrypt_key(getattr(s, 'platega_api_key', None)) if getattr(s, 'platega_api_key', None) else None
+            platega_merchant = decrypt_key(getattr(s, 'platega_merchant_id', None)) if getattr(s, 'platega_merchant_id', None) else None
+            if platega_key and platega_merchant and platega_key != "DECRYPTION_ERROR" and platega_merchant != "DECRYPTION_ERROR":
+                available.append('platega')
+                if getattr(s, 'platega_mir_enabled', False):
+                    available.append('platega_mir')
+            
+            # Mulenpay - нужны api_key, secret_key и shop_id
+            mulenpay_key = decrypt_key(getattr(s, 'mulenpay_api_key', None)) if getattr(s, 'mulenpay_api_key', None) else None
+            mulenpay_secret = decrypt_key(getattr(s, 'mulenpay_secret_key', None)) if getattr(s, 'mulenpay_secret_key', None) else None
+            mulenpay_shop = decrypt_key(getattr(s, 'mulenpay_shop_id', None)) if getattr(s, 'mulenpay_shop_id', None) else None
+            if mulenpay_key and mulenpay_secret and mulenpay_shop and mulenpay_key != "DECRYPTION_ERROR" and mulenpay_secret != "DECRYPTION_ERROR" and mulenpay_shop != "DECRYPTION_ERROR":
+                available.append('mulenpay')
+            
+            # UrlPay - нужны api_key, secret_key и shop_id
+            urlpay_key = decrypt_key(getattr(s, 'urlpay_api_key', None)) if getattr(s, 'urlpay_api_key', None) else None
+            urlpay_secret = decrypt_key(getattr(s, 'urlpay_secret_key', None)) if getattr(s, 'urlpay_secret_key', None) else None
+            urlpay_shop = decrypt_key(getattr(s, 'urlpay_shop_id', None)) if getattr(s, 'urlpay_shop_id', None) else None
+            if urlpay_key and urlpay_secret and urlpay_shop and urlpay_key != "DECRYPTION_ERROR" and urlpay_secret != "DECRYPTION_ERROR" and urlpay_shop != "DECRYPTION_ERROR":
+                available.append('urlpay')
+            
+            # Telegram Stars - нужен bot_token
+            telegram_token = decrypt_key(s.telegram_bot_token) if s.telegram_bot_token else None
+            if telegram_token and telegram_token != "DECRYPTION_ERROR":
+                available.append('telegram_stars')
+            
+            # Monobank - нужен token
+            monobank_token = decrypt_key(getattr(s, 'monobank_token', None)) if getattr(s, 'monobank_token', None) else None
+            if monobank_token and monobank_token != "DECRYPTION_ERROR":
+                available.append('monobank')
+            
+            # BTCPayServer - нужны url, api_key и store_id
+            btcpayserver_url = decrypt_key(getattr(s, 'btcpayserver_url', None)) if getattr(s, 'btcpayserver_url', None) else None
+            btcpayserver_api_key = decrypt_key(getattr(s, 'btcpayserver_api_key', None)) if getattr(s, 'btcpayserver_api_key', None) else None
+            btcpayserver_store_id = decrypt_key(getattr(s, 'btcpayserver_store_id', None)) if getattr(s, 'btcpayserver_store_id', None) else None
+            if btcpayserver_url and btcpayserver_api_key and btcpayserver_store_id and btcpayserver_url != "DECRYPTION_ERROR" and btcpayserver_api_key != "DECRYPTION_ERROR" and btcpayserver_store_id != "DECRYPTION_ERROR":
+                available.append('btcpayserver')
+            
+            # Tribute - нужен api_key
+            tribute_api_key = decrypt_key(getattr(s, 'tribute_api_key', None)) if getattr(s, 'tribute_api_key', None) else None
+            if tribute_api_key and tribute_api_key != "DECRYPTION_ERROR":
+                available.append('tribute')
+            
+            # Robokassa - нужны merchant_login и password1
+            robokassa_login = decrypt_key(getattr(s, 'robokassa_merchant_login', None)) if getattr(s, 'robokassa_merchant_login', None) else None
+            robokassa_password1 = decrypt_key(getattr(s, 'robokassa_password1', None)) if getattr(s, 'robokassa_password1', None) else None
+            if robokassa_login and robokassa_password1 and robokassa_login != "DECRYPTION_ERROR" and robokassa_password1 != "DECRYPTION_ERROR":
+                available.append('robokassa')
+            
+            # Freekassa - нужны shop_id и secret
+            freekassa_shop_id = decrypt_key(s.freekassa_shop_id) if s.freekassa_shop_id else None
+            freekassa_secret = decrypt_key(s.freekassa_secret) if s.freekassa_secret else None
+            if freekassa_shop_id and freekassa_secret and freekassa_shop_id != "DECRYPTION_ERROR" and freekassa_secret != "DECRYPTION_ERROR":
+                available.append('freekassa')
+            
+            # CryptoBot - нужен api_key
+            cryptobot_api_key = decrypt_key(s.cryptobot_api_key) if s.cryptobot_api_key else None
+            if cryptobot_api_key and cryptobot_api_key != "DECRYPTION_ERROR":
+                available.append('cryptobot')
         
-        # Platega - нужны api_key и merchant_id
-        platega_key = decrypt_key(getattr(s, 'platega_api_key', None)) if getattr(s, 'platega_api_key', None) else None
-        platega_merchant = decrypt_key(getattr(s, 'platega_merchant_id', None)) if getattr(s, 'platega_merchant_id', None) else None
-        if platega_key and platega_merchant and platega_key != "DECRYPTION_ERROR" and platega_merchant != "DECRYPTION_ERROR":
-            available.append('platega')
-            if getattr(s, 'platega_mir_enabled', False):
-                available.append('platega_mir')
-        
-        # Mulenpay - нужны api_key, secret_key и shop_id
-        mulenpay_key = decrypt_key(getattr(s, 'mulenpay_api_key', None)) if getattr(s, 'mulenpay_api_key', None) else None
-        mulenpay_secret = decrypt_key(getattr(s, 'mulenpay_secret_key', None)) if getattr(s, 'mulenpay_secret_key', None) else None
-        mulenpay_shop = decrypt_key(getattr(s, 'mulenpay_shop_id', None)) if getattr(s, 'mulenpay_shop_id', None) else None
-        if mulenpay_key and mulenpay_secret and mulenpay_shop and mulenpay_key != "DECRYPTION_ERROR" and mulenpay_secret != "DECRYPTION_ERROR" and mulenpay_shop != "DECRYPTION_ERROR":
-            available.append('mulenpay')
-        
-        # UrlPay - нужны api_key, secret_key и shop_id
-        urlpay_key = decrypt_key(getattr(s, 'urlpay_api_key', None)) if getattr(s, 'urlpay_api_key', None) else None
-        urlpay_secret = decrypt_key(getattr(s, 'urlpay_secret_key', None)) if getattr(s, 'urlpay_secret_key', None) else None
-        urlpay_shop = decrypt_key(getattr(s, 'urlpay_shop_id', None)) if getattr(s, 'urlpay_shop_id', None) else None
-        if urlpay_key and urlpay_secret and urlpay_shop and urlpay_key != "DECRYPTION_ERROR" and urlpay_secret != "DECRYPTION_ERROR" and urlpay_shop != "DECRYPTION_ERROR":
-            available.append('urlpay')
-        
-        # Telegram Stars - нужен bot_token
-        telegram_token = decrypt_key(s.telegram_bot_token) if s.telegram_bot_token else None
-        if telegram_token and telegram_token != "DECRYPTION_ERROR":
-            available.append('telegram_stars')
-        
-        # Monobank - нужен token
-        monobank_token = decrypt_key(getattr(s, 'monobank_token', None)) if getattr(s, 'monobank_token', None) else None
-        if monobank_token and monobank_token != "DECRYPTION_ERROR":
-            available.append('monobank')
-        
-        # BTCPayServer - нужны url, api_key и store_id
-        btcpayserver_url = decrypt_key(getattr(s, 'btcpayserver_url', None)) if getattr(s, 'btcpayserver_url', None) else None
-        btcpayserver_api_key = decrypt_key(getattr(s, 'btcpayserver_api_key', None)) if getattr(s, 'btcpayserver_api_key', None) else None
-        btcpayserver_store_id = decrypt_key(getattr(s, 'btcpayserver_store_id', None)) if getattr(s, 'btcpayserver_store_id', None) else None
-        if btcpayserver_url and btcpayserver_api_key and btcpayserver_store_id and btcpayserver_url != "DECRYPTION_ERROR" and btcpayserver_api_key != "DECRYPTION_ERROR" and btcpayserver_store_id != "DECRYPTION_ERROR":
-            available.append('btcpayserver')
-        
-        # Tribute - нужен api_key
-        tribute_api_key = decrypt_key(getattr(s, 'tribute_api_key', None)) if getattr(s, 'tribute_api_key', None) else None
-        if tribute_api_key and tribute_api_key != "DECRYPTION_ERROR":
-            available.append('tribute')
-        
-        # Robokassa - нужны merchant_login и password1
-        robokassa_login = decrypt_key(getattr(s, 'robokassa_merchant_login', None)) if getattr(s, 'robokassa_merchant_login', None) else None
-        robokassa_password1 = decrypt_key(getattr(s, 'robokassa_password1', None)) if getattr(s, 'robokassa_password1', None) else None
-        if robokassa_login and robokassa_password1 and robokassa_login != "DECRYPTION_ERROR" and robokassa_password1 != "DECRYPTION_ERROR":
-            available.append('robokassa')
-        
-        # Freekassa - нужны shop_id и secret
-        freekassa_shop_id = decrypt_key(s.freekassa_shop_id) if s.freekassa_shop_id else None
-        freekassa_secret = decrypt_key(s.freekassa_secret) if s.freekassa_secret else None
-        if freekassa_shop_id and freekassa_secret and freekassa_shop_id != "DECRYPTION_ERROR" and freekassa_secret != "DECRYPTION_ERROR":
-            available.append('freekassa')
-        
-        # CryptoBot - нужен api_key
-        cryptobot_api_key = decrypt_key(s.cryptobot_api_key) if s.cryptobot_api_key else None
-        if cryptobot_api_key and cryptobot_api_key != "DECRYPTION_ERROR":
-            available.append('cryptobot')
+        # Kassa AI (api.fk.life) — из env, работает и без настроек в админке
+        kassa_ai_key = (os.getenv("FREEEKASSA_API_KEY") or "").strip()
+        kassa_ai_shop = (os.getenv("FREEEKASSA_SHOP_ID") or "").strip()
+        if kassa_ai_key and kassa_ai_shop:
+            try:
+                int(kassa_ai_shop)
+                available.append('kassa_ai')
+            except ValueError:
+                pass
         
         return jsonify({"available_methods": available}), 200
         

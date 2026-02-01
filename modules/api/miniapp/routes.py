@@ -232,7 +232,8 @@ def miniapp_subscription():
                 'balance_usd': float(user_obj.balance) if user_obj.balance else 0.0,
                 'currency': user_obj.preferred_currency or 'uah',
                 'preferred_currency': user_obj.preferred_currency or 'uah',
-                'activeInternalSquads': active_squads  # Для старого мини-апп
+                'activeInternalSquads': active_squads,  # Для старого мини-апп
+                'hwidDeviceLimit': data_dict.get('hwidDeviceLimit'),  # Лимит устройств из тарифа
             }
             
             # Возвращаем в формате, совместимом со старым мини-апп
@@ -423,41 +424,46 @@ def miniapp_payment_methods():
 
     try:
         s = PaymentSetting.query.first()
-        if not s:
-            return jsonify({"methods": []}), 200
-
         available = []
 
-        if s.crystalpay_api_key and decrypt_key(s.crystalpay_api_key):
-            available.append({"id": "crystalpay", "name": "CrystalPay", "type": "redirect"})
-        if s.heleket_api_key and decrypt_key(s.heleket_api_key):
-            available.append({"id": "heleket", "name": "Heleket (Крипто)", "type": "crypto"})
-        # YooKassa - нужны shop_id и secret_key
-        if s.yookassa_shop_id and s.yookassa_secret_key and decrypt_key(s.yookassa_shop_id) and decrypt_key(s.yookassa_secret_key):
-            available.append({"id": "yookassa", "name": "YooKassa", "type": "redirect"})
-        # YooMoney - нужны receiver и notification_secret
-        if getattr(s, 'yoomoney_receiver', None) and getattr(s, 'yoomoney_notification_secret', None) and decrypt_key(s.yoomoney_receiver) and decrypt_key(s.yoomoney_notification_secret):
-            available.append({"id": "yoomoney", "name": "YooMoney", "type": "redirect"})
-        if s.telegram_bot_token and decrypt_key(s.telegram_bot_token):
-            available.append({"id": "telegram_stars", "name": "Telegram Stars", "type": "telegram"})
-        if getattr(s, 'platega_api_key', None) and decrypt_key(s.platega_api_key):
-            available.append({"id": "platega", "name": "Platega", "type": "redirect"})
-            if getattr(s, 'platega_mir_enabled', False):
-                available.append({"id": "platega_mir", "name": "Карты МИР", "type": "redirect"})
-        if getattr(s, 'monobank_token', None) and decrypt_key(s.monobank_token):
-            available.append({"id": "monobank", "name": "Monobank", "type": "card"})
-        if getattr(s, 'freekassa_shop_id', None) and decrypt_key(s.freekassa_shop_id):
-            available.append({"id": "freekassa", "name": "Freekassa", "type": "redirect"})
-        if getattr(s, 'robokassa_merchant_login', None) and decrypt_key(s.robokassa_merchant_login):
-            available.append({"id": "robokassa", "name": "Robokassa", "type": "redirect"})
-        if getattr(s, 'mulenpay_api_key', None) and decrypt_key(s.mulenpay_api_key):
-            available.append({"id": "mulenpay", "name": "MulenPay", "type": "redirect"})
-        if getattr(s, 'urlpay_api_key', None) and decrypt_key(s.urlpay_api_key):
-            available.append({"id": "urlpay", "name": "UrlPay", "type": "redirect"})
-        if getattr(s, 'tribute_api_key', None) and decrypt_key(s.tribute_api_key):
-            available.append({"id": "tribute", "name": "Tribute", "type": "redirect"})
-        if getattr(s, 'btcpayserver_api_key', None) and decrypt_key(s.btcpayserver_api_key):
-            available.append({"id": "btcpayserver", "name": "BTCPay (Bitcoin)", "type": "crypto"})
+        # Методы из админки (PaymentSetting) — только если запись есть
+        if s:
+            if s.crystalpay_api_key and decrypt_key(s.crystalpay_api_key):
+                available.append({"id": "crystalpay", "name": "CrystalPay", "type": "redirect"})
+            if s.heleket_api_key and decrypt_key(s.heleket_api_key):
+                available.append({"id": "heleket", "name": "Heleket (Крипто)", "type": "crypto"})
+            if s.yookassa_shop_id and s.yookassa_secret_key and decrypt_key(s.yookassa_shop_id) and decrypt_key(s.yookassa_secret_key):
+                available.append({"id": "yookassa", "name": "YooKassa", "type": "redirect"})
+            if getattr(s, 'yoomoney_receiver', None) and getattr(s, 'yoomoney_notification_secret', None) and decrypt_key(getattr(s, 'yoomoney_receiver', None)) and decrypt_key(getattr(s, 'yoomoney_notification_secret', None)):
+                available.append({"id": "yoomoney", "name": "YooMoney", "type": "redirect"})
+            if s.telegram_bot_token and decrypt_key(s.telegram_bot_token):
+                available.append({"id": "telegram_stars", "name": "Telegram Stars", "type": "telegram"})
+            if getattr(s, 'platega_api_key', None) and decrypt_key(s.platega_api_key):
+                available.append({"id": "platega", "name": "Platega", "type": "redirect"})
+                if getattr(s, 'platega_mir_enabled', False):
+                    available.append({"id": "platega_mir", "name": "Карты МИР", "type": "redirect"})
+            if getattr(s, 'monobank_token', None) and decrypt_key(s.monobank_token):
+                available.append({"id": "monobank", "name": "Monobank", "type": "card"})
+            if getattr(s, 'freekassa_shop_id', None) and decrypt_key(s.freekassa_shop_id):
+                available.append({"id": "freekassa", "name": "Freekassa", "type": "redirect"})
+            if getattr(s, 'robokassa_merchant_login', None) and decrypt_key(s.robokassa_merchant_login):
+                available.append({"id": "robokassa", "name": "Robokassa", "type": "redirect"})
+            if getattr(s, 'mulenpay_api_key', None) and decrypt_key(s.mulenpay_api_key):
+                available.append({"id": "mulenpay", "name": "MulenPay", "type": "redirect"})
+            if getattr(s, 'urlpay_api_key', None) and decrypt_key(s.urlpay_api_key):
+                available.append({"id": "urlpay", "name": "UrlPay", "type": "redirect"})
+            if getattr(s, 'tribute_api_key', None) and decrypt_key(s.tribute_api_key):
+                available.append({"id": "tribute", "name": "Tribute", "type": "redirect"})
+            if getattr(s, 'btcpayserver_api_key', None) and decrypt_key(s.btcpayserver_api_key):
+                available.append({"id": "btcpayserver", "name": "BTCPay (Bitcoin)", "type": "crypto"})
+
+        # Kassa AI из env — доступен и без настроек в админке
+        if (os.getenv("FREEEKASSA_API_KEY") or "").strip() and (os.getenv("FREEEKASSA_SHOP_ID") or "").strip():
+            try:
+                int((os.getenv("FREEEKASSA_SHOP_ID") or "").strip())
+                available.append({"id": "kassa_ai", "name": "Kassa AI", "type": "redirect"})
+            except ValueError:
+                pass
 
         response = jsonify({"methods": available})
         response.headers.add('Access-Control-Allow-Origin', '*')
@@ -1212,8 +1218,10 @@ def miniapp_tariffs():
                 "squad_id": t.squad_id,  # Для обратной совместимости
                 "squad_ids": t.get_squad_ids() if hasattr(t, 'get_squad_ids') else (t.squad_ids if hasattr(t, 'squad_ids') else None),
                 "traffic_limit_bytes": t.traffic_limit_bytes or 0,
+                "hwid_device_limit": t.hwid_device_limit if hasattr(t, 'hwid_device_limit') else None,
                 "tier": t.tier,
-                "badge": t.badge
+                "badge": t.badge,
+                "bonus_days": t.bonus_days if hasattr(t, 'bonus_days') else 0
             }
             tariffs_list.append(tariff_data)
         
