@@ -131,6 +131,13 @@ def migrate_users(bedolaga_data, db):
         print("  ℹ️  Пользователи не найдены в бекапе")
         return {}
     
+    # В панели баланс хранится в USD; при отображении в рублях: balance_usd * курс_RUB
+    # Чтобы суммы в рублях совпадали с Бедолагой, сохраняем: balance_usd = рубли / курс_RUB
+    from modules.currency import get_currency_rate
+    rate_rub = get_currency_rate('RUB') or 95.0
+    if rate_rub <= 0:
+        rate_rub = 95.0
+    
     user_id_mapping = {}  # Старый ID -> Новый ID
     migrated_count = 0
     skipped_count = 0
@@ -151,13 +158,16 @@ def migrate_users(bedolaga_data, db):
                 skipped_count += 1
                 continue
             
-            # Создаем нового пользователя
+            # Баланс в Бедолаге — копейки; в панели хранится в USD. Сохраняем в USD, чтобы при отображении в рублях суммы совпадали
+            balance_rub = bed_user.get('balance_kopeks', 0) / 100.0
+            balance_usd = balance_rub / rate_rub
             user = User(
                 telegram_id=str(bed_user['telegram_id']),
                 telegram_username=bed_user.get('username'),
                 remnawave_uuid=bed_user.get('remnawave_uuid'),
                 referral_code=bed_user.get('referral_code'),
-                balance=bed_user.get('balance_kopeks', 0) / 100.0,  # Конвертируем копейки в рубли
+                balance=balance_usd,
+                preferred_currency='rub',  # Отображать в рублях, без искажения курсом
                 preferred_lang=bed_user.get('language', 'ru'),
                 trial_used=bed_user.get('has_had_paid_subscription', False),
                 created_at=datetime.fromisoformat(bed_user['created_at'].replace('Z', '+00:00')) if bed_user.get('created_at') else datetime.now(timezone.utc)
@@ -304,8 +314,6 @@ def migrate_payments(bedolaga_data, user_id_mapping, db):
         if existing_payment:
             continue
         
-        # payment_system_id в модели ограничен 100 символами — обрезаем при необходимости
-        payment_system_id_val = (external_id[:100] if external_id and len(external_id) > 100 else external_id) if external_id else None
         payment = Payment(
             order_id=order_id,
             user_id=user_id,
@@ -313,7 +321,7 @@ def migrate_payments(bedolaga_data, user_id_mapping, db):
             amount=amount,
             currency=currency,
             payment_provider=provider,
-            payment_system_id=payment_system_id_val,
+            payment_system_id=external_id,
             description=trans.get('description', ''),
             created_at=datetime.fromisoformat(trans['created_at'].replace('Z', '+00:00')) if trans.get('created_at') else datetime.now(timezone.utc)
         )
