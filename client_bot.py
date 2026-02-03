@@ -13,6 +13,7 @@ import json
 import time
 import re
 import math
+import html
 import hashlib
 from datetime import datetime
 from typing import Optional
@@ -448,11 +449,10 @@ def get_buttons_order() -> list:
 
 
 def _subscription_url_for_copy(url: str) -> str:
-    """Ссылка с нулевым пробелом в середине — в Telegram не открывается по тапу, только выделение/копирование."""
+    """Ссылка в теге <code> — в Telegram отображается моноширинно и удобно копируется по тапу."""
     if not url or len(url) < 6:
         return url
-    mid = len(url) // 2
-    return url[:mid] + '\u200b' + url[mid:]
+    return f"<code>{html.escape(url)}</code>"
 
 
 def build_main_menu_keyboard(user_lang: str, is_active: bool, subscription_url: str, expire_at, trial_used: bool = False) -> list:
