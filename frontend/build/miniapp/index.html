@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#0a0a0f">
+    <meta name="theme-color" content="#0f1629">
     <title>VPN</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -78,13 +78,13 @@
 
         :root[data-theme="dark"] {
             color-scheme: dark;
-            --tg-theme-bg-color: #0a0a0f;
+            --tg-theme-bg-color: #0f1629;
             --tg-theme-text-color: #f1f5f9;
             --tg-theme-hint-color: #94a3b8;
             --tg-theme-link-color: #818cf8;
             --tg-theme-button-color: #6366f1;
             --tg-theme-button-text-color: #ffffff;
-            --tg-theme-secondary-bg-color: #12121a;
+            --tg-theme-secondary-bg-color: #151d35;
             
             --primary: #818cf8;
             --primary-rgb: 129, 140, 248;
@@ -99,12 +99,12 @@
             --text-secondary: #94a3b8;
             --text-muted: #64748b;
             
-            --bg-primary: #0a0a0f;
-            --bg-secondary: #12121a;
-            --bg-tertiary: #1a1a25;
-            --body-bg: #0a0a0f;
+            --bg-primary: #0f1629;
+            --bg-secondary: #151d35;
+            --bg-tertiary: #1e2a47;
+            --body-bg: #0f1629;
             
-            --glass-bg: rgba(18, 18, 26, 0.8);
+            --glass-bg: rgba(21, 29, 53, 0.85);
             --glass-border: rgba(255, 255, 255, 0.06);
             --glass-blur: saturate(180%) blur(20px);
             --bg-glass: var(--glass-bg);
@@ -127,7 +127,7 @@
             
             --surface-muted: rgba(255, 255, 255, 0.05);
             --surface-strong: rgba(129, 140, 248, 0.15);
-            --tariff-card-bg: rgba(26, 26, 37, 0.9);
+            --tariff-card-bg: rgba(30, 42, 71, 0.9);
             --tariff-card-border: rgba(255, 255, 255, 0.1);
             --gradient-primary: linear-gradient(135deg, rgba(129, 140, 248, 0.15) 0%, rgba(192, 132, 252, 0.1) 100%);
             --gradient-card: linear-gradient(145deg, rgba(129, 140, 248, 0.08) 0%, rgba(34, 211, 238, 0.04) 100%);
@@ -754,12 +754,12 @@
         }
         
         :root[data-theme="dark"] .tariff-accordion-header {
-            background: rgba(26, 26, 37, 0.9) !important;
+            background: rgba(30, 42, 71, 0.9) !important;
             border-color: rgba(255, 255, 255, 0.12) !important;
         }
         
         :root[data-theme="dark"] .tariff-card {
-            background: rgba(26, 26, 37, 0.9) !important;
+            background: rgba(30, 42, 71, 0.9) !important;
             border-color: rgba(255, 255, 255, 0.12) !important;
         }
         
@@ -1390,7 +1390,7 @@
         }
         
         :root[data-theme="dark"] .modal-content {
-            background: rgba(26, 26, 37, 0.95);
+            background: rgba(30, 42, 71, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.12);
             box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
         }
@@ -5171,7 +5171,7 @@
                 }
                 
                 const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-                const cardBg = isDark ? 'rgba(26, 26, 37, 0.9)' : 'var(--glass-bg)';
+                const cardBg = isDark ? 'rgba(30, 42, 71, 0.9)' : 'var(--glass-bg)';
                 const cardBorder = isDark ? 'rgba(255, 255, 255, 0.12)' : 'var(--glass-border)';
                 const cardHoverBg = isDark ? 'rgba(129, 140, 248, 0.15)' : 'var(--surface-strong)';
                 const cardHoverBorder = isDark ? 'rgba(129, 140, 248, 0.4)' : 'rgba(var(--primary-rgb), 0.3)';
