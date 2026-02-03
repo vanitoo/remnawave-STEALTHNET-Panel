@@ -3,7 +3,7 @@ Telegram Stars - оплата через Telegram
 https://core.telegram.org/bots/payments
 """
 import requests
-from modules.api.payments.base import get_payment_settings, decrypt_key
+from modules.api.payments.base import get_payment_settings, decrypt_key, get_service_name_for_payment
 
 
 def create_telegram_stars_payment(amount: float, currency: str, order_id: str, **kwargs):
@@ -42,7 +42,7 @@ def create_telegram_stars_payment(amount: float, currency: str, order_id: str, *
             stars_amount = 1
         
         payload = {
-            "title": "Подписка StealthNET",
+            "title": f"Подписка {get_service_name_for_payment()}",
             "description": "Подписка на VPN сервис",
             "payload": order_id,
             "provider_token": "",  # Пустой для Stars

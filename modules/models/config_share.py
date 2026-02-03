@@ -19,7 +19,7 @@ class ConfigShareToken(db.Model):
     max_uses = db.Column(db.Integer, default=1, nullable=False)  # Максимальное количество использований
     current_uses = db.Column(db.Integer, default=0, nullable=False)  # Текущее количество использований
     is_active = db.Column(db.Boolean, default=True, nullable=False)  # Активен ли токен
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     
     # Связи
     config = db.relationship('UserConfig', backref='share_tokens')

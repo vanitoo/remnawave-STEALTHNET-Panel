@@ -145,44 +145,56 @@ def ceil_days_until(expire_at: datetime, now: datetime) -> int:
     except Exception:
         return 0
 
+
+def days_word_ru(n: int) -> str:
+    """Склонение «день/дня/дней» для числа n."""
+    if n == 1:
+        return "день"
+    if 2 <= n <= 4:
+        return "дня"
+    return "дней"
+
 def send_telegram_message(bot_token, chat_id, text, photo_file=None, button_text=None, button_url=None, button_action=None):
     """Отправить сообщение в Telegram с опциональной inline кнопкой"""
     try:
         # Формируем inline keyboard если есть кнопка
         reply_markup = None
+        buttons = []
+        
         if button_text and (button_url or button_action):
             if button_action == 'tariffs':
                 # Callback кнопка для открытия тарифов
-                reply_markup = {
-                    "inline_keyboard": [[{
-                        "text": button_text,
-                        "callback_data": "tariffs"
-                    }]]
-                }
+                buttons.append([{
+                    "text": button_text,
+                    "callback_data": "tariffs"
+                }])
             elif button_action == 'webapp' and button_url:
                 # Web App кнопка
-                reply_markup = {
-                    "inline_keyboard": [[{
-                        "text": button_text,
-                        "web_app": {"url": button_url}
-                    }]]
-                }
+                buttons.append([{
+                    "text": button_text,
+                    "web_app": {"url": button_url}
+                }])
             elif button_action == 'url' and button_url:
                 # Обычная URL кнопка
-                reply_markup = {
-                    "inline_keyboard": [[{
-                        "text": button_text,
-                        "url": button_url
-                    }]]
-                }
+                buttons.append([{
+                    "text": button_text,
+                    "url": button_url
+                }])
             elif button_action == 'trial':
                 # Callback кнопка для триала
-                reply_markup = {
-                    "inline_keyboard": [[{
-                        "text": button_text,
-                        "callback_data": "activate_trial"
-                    }]]
-                }
+                buttons.append([{
+                    "text": button_text,
+                    "callback_data": "activate_trial"
+                }])
+        
+        # Всегда добавляем кнопку "В главное меню" при любой авто-рассылке
+        buttons.append([{
+            "text": "🏠 В главное меню",
+            "callback_data": "clear_and_main_menu"
+        }])
+        reply_markup = {
+            "inline_keyboard": buttons
+        }
         
         def _do_request():
             if photo_file:
@@ -315,6 +327,14 @@ def send_auto_broadcasts():
             message_type='trial_active'
         ).first()
         
+        # Длительность триала из настроек (1, 3 и т.д. дней)
+        trial_days = 3
+        try:
+            from modules.models.trial import get_trial_settings
+            trial_days = max(1, int(get_trial_settings().days or 3))
+        except Exception:
+            trial_days = 3
+        
         # Получаем токены ботов
         old_bot_token = os.getenv("CLIENT_BOT_TOKEN")
         new_bot_token = os.getenv("CLIENT_BOT_V2_TOKEN") or os.getenv("CLIENT_BOT_TOKEN")
@@ -436,16 +456,20 @@ def send_auto_broadcasts():
                 # Проверяем, истекает ли подписка через 3 дня
                 days_until_expiry = ceil_days_until(expire_at, now)
                 
-                # Проверяем, является ли это триалом (обычно 3 дня)
+                # Является ли подписка триалом: по длительности (createdAt..expireAt) или по оставшимся дням
                 created_at_str = user_info.get('createdAt')
                 created_at = parse_iso_datetime(created_at_str) if created_at_str else None
                 is_trial = False
                 if created_at and expire_at:
                     try:
                         total_seconds = (expire_at - created_at).total_seconds()
-                        is_trial = total_seconds <= (3 * 24 * 60 * 60 + 60)  # <= 3 дня (+1 мин допуск)
+                        # Длительность триала из настроек (1, 3 и т.д. дней)
+                        is_trial = total_seconds <= (trial_days * 24 * 60 * 60 + 60)
                     except Exception:
                         is_trial = False
+                else:
+                    # createdAt нет — считаем триалом, если осталось не больше trial_days
+                    is_trial = 0 < days_until_expiry <= trial_days
                 
                 # Проверяем подписку, истекающую через 3 дня
                 # Отправляем за 3 дня до окончания
@@ -466,9 +490,16 @@ def send_auto_broadcasts():
                     expire_at > now
                 )
                 
-                # Отправляем уведомление о подписке
+                # Отправляем уведомление о подписке (платной), подставляем фактическое число дней
                 if is_subscription_expiring and subscription_msg and subscription_msg.enabled:
-                    message_text = subscription_msg.message_text
+                    message_text = subscription_msg.message_text or ""
+                    if "{days}" in message_text or "{days_word}" in message_text:
+                        message_text = message_text.replace("{days}", str(days_until_expiry)).replace("{days_word}", days_word_ru(days_until_expiry))
+                    else:
+                        # Обратная совместимость: подменить захардкоженные «3 дня» на фактическое число
+                        dw = days_word_ru(days_until_expiry)
+                        for old in ("3 дня", "3 дней", "3 дн."):
+                            message_text = message_text.replace(old, f"{days_until_expiry} {dw}")
                     if should_send(subscription_msg.message_type, str(user.telegram_id)):
                         success, result = send_via_configured_bots(
                             subscription_msg.bot_type, old_bot_token, new_bot_token, user.telegram_id,
@@ -557,10 +588,10 @@ def send_auto_broadcasts():
                         created_at_str = user_info.get('createdAt')
                         created_at = parse_iso_datetime(created_at_str) if created_at_str else None
                         
-                        # Если пользователь зарегистрирован более 3 дней назад и не имеет подписки - вероятно, не использовал триал
+                        # Если пользователь зарегистрирован более trial_days назад и не имеет подписки — вероятно, не использовал триал
                         if created_at:
                             days_since_registration = (now - created_at).days
-                            if days_since_registration >= 3:
+                            if days_since_registration >= trial_days:
                                 if should_send(trial_not_used_msg.message_type, str(user.telegram_id)):
                                     success, result = send_via_configured_bots(
                                         trial_not_used_msg.bot_type, old_bot_token, new_bot_token, user.telegram_id,

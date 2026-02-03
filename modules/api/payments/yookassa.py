@@ -5,7 +5,7 @@ https://yookassa.ru/
 import requests
 import uuid
 import json
-from modules.api.payments.base import get_payment_settings, decrypt_key, get_callback_url, get_return_url
+from modules.api.payments.base import get_payment_settings, decrypt_key, get_callback_url, get_return_url, get_service_name_for_payment
 
 
 def create_yookassa_payment(amount: float, currency: str, order_id: str, **kwargs):
@@ -59,7 +59,7 @@ def create_yookassa_payment(amount: float, currency: str, order_id: str, **kwarg
                 "return_url": get_return_url(kwargs.get('source', 'miniapp'), kwargs.get('miniapp_type', 'v2'))
             },
             "capture": True,
-            "description": kwargs.get('description', f"Подписка StealthNET #{order_id}"),
+            "description": kwargs.get('description', f"Подписка {get_service_name_for_payment()} #{order_id}"),
             "metadata": {
                 "order_id": order_id
             }
@@ -86,7 +86,7 @@ def create_yookassa_payment(amount: float, currency: str, order_id: str, **kwarg
                 # https://yookassa.ru/developers/payment-acceptance/receipts/54fz/yoomoney/payments
                 # https://yookassa.ru/developers/payment-acceptance/receipts/54fz/yoomoney/parameters-values
                 receipt_items = kwargs.get('receipt_items', [{
-                    "description": kwargs.get('description', f"Подписка StealthNET #{order_id}"),
+                    "description": kwargs.get('description', f"Подписка {get_service_name_for_payment()} #{order_id}"),
                     "quantity": "1.00",  # Обязательно строка с двумя знаками после точки
                     "amount": {
                         "value": f"{amount:.2f}",  # Обязательно строка с двумя знаками после точки

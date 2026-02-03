@@ -3,7 +3,7 @@ CryptoBot - платёжная система Telegram
 https://t.me/CryptoBot
 """
 import requests
-from modules.api.payments.base import get_payment_settings, decrypt_key, get_callback_url
+from modules.api.payments.base import get_payment_settings, decrypt_key, get_callback_url, get_service_name_for_payment
 
 
 def create_cryptobot_payment(amount: float, currency: str, order_id: str, **kwargs):
@@ -34,7 +34,7 @@ def create_cryptobot_payment(amount: float, currency: str, order_id: str, **kwar
         payload = {
             "asset": crypto_currency,
             "amount": str(amount),
-            "description": f"Подписка StealthNET #{order_id}",
+            "description": f"Подписка {get_service_name_for_payment()} #{order_id}",
             "hidden_message": order_id,
             "payload": order_id,
             "allow_comments": False,

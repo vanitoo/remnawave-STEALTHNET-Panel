@@ -3,7 +3,7 @@ Robokassa - платёжная система
 https://robokassa.com/
 """
 import hashlib
-from modules.api.payments.base import get_payment_settings, decrypt_key
+from modules.api.payments.base import get_payment_settings, decrypt_key, get_service_name_for_payment
 
 
 def create_robokassa_payment(amount: float, currency: str, order_id: str, **kwargs):
@@ -30,7 +30,7 @@ def create_robokassa_payment(amount: float, currency: str, order_id: str, **kwar
         return None, "Robokassa credentials not configured"
     
     try:
-        description = kwargs.get('description', f'Подписка StealthNET #{order_id}')
+        description = kwargs.get('description', f'Подписка {get_service_name_for_payment()} #{order_id}')
         
         # Robokassa работает с RUB
         out_sum = f"{amount:.2f}"

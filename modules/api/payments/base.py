@@ -58,6 +58,16 @@ def get_callback_url(provider: str) -> str:
     return f"{base_url}/api/webhook/{provider}" if base_url else f"/api/webhook/{provider}"
 
 
+def get_service_name_for_payment() -> str:
+    """Имя сервиса из брендинга для описаний платежей."""
+    try:
+        from modules.models.branding import BrandingSetting
+        b = BrandingSetting.query.first()
+        return (b.site_name or "").strip() if b else "Панель"
+    except Exception:
+        return "Панель"
+
+
 def get_bot_username() -> str:
     """Получить username бота для deep links"""
     # ВАЖНО: TELEGRAM_BOT_NAME_V2 имеет высший приоритет
@@ -112,12 +122,12 @@ def get_return_url(source='miniapp', miniapp_type='v2') -> str:
 
     # Для старого мини-аппа используем /miniapp/payment-success.html
     if miniapp_type in ('v1', 'old'):
-        bot_username = get_bot_username() or 'stealthnet_test_bot'
-        return f"{base_url}/miniapp/payment-success.html?bot={bot_username}"
+        bot_username = get_bot_username() or ''
+        return f"{base_url}/miniapp/payment-success.html?bot={bot_username}" if bot_username else f"{base_url}/miniapp/payment-success.html"
 
     # Для нового мини-апп используем специальную страницу успешной оплаты с автоматическим редиректом в бот
-    bot_username = get_bot_username() or 'stealthnet_test_bot'
-    return f"{base_url}/payment-success.html?bot={bot_username}"
+    bot_username = get_bot_username() or ''
+    return f"{base_url}/payment-success.html?bot={bot_username}" if bot_username else f"{base_url}/payment-success.html"
 
 
 def get_telegram_deep_link() -> str:

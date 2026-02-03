@@ -19,9 +19,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Flask
 from modules.core import init_app, get_db
-
-# Модели импортируем после init_app(), иначе при загрузке моделей вызывается get_db() и падает "Database not initialized"
-
+from modules.models import (
+    User, Payment, Tariff, PromoCode, Ticket, TicketMessage,
+    UserConfig
+)
 
 def parse_args():
     """Парсинг аргументов командной строки"""
@@ -131,13 +132,6 @@ def migrate_users(bedolaga_data, db):
         print("  ℹ️  Пользователи не найдены в бекапе")
         return {}
     
-    # В панели баланс хранится в USD; при отображении в рублях: balance_usd * курс_RUB
-    # Чтобы суммы в рублях совпадали с Бедолагой, сохраняем: balance_usd = рубли / курс_RUB
-    from modules.currency import get_currency_rate
-    rate_rub = get_currency_rate('RUB') or 95.0
-    if rate_rub <= 0:
-        rate_rub = 95.0
-    
     user_id_mapping = {}  # Старый ID -> Новый ID
     migrated_count = 0
     skipped_count = 0
@@ -158,16 +152,13 @@ def migrate_users(bedolaga_data, db):
                 skipped_count += 1
                 continue
             
-            # Баланс в Бедолаге — копейки; в панели хранится в USD. Сохраняем в USD, чтобы при отображении в рублях суммы совпадали
-            balance_rub = bed_user.get('balance_kopeks', 0) / 100.0
-            balance_usd = balance_rub / rate_rub
+            # Создаем нового пользователя
             user = User(
                 telegram_id=str(bed_user['telegram_id']),
                 telegram_username=bed_user.get('username'),
                 remnawave_uuid=bed_user.get('remnawave_uuid'),
                 referral_code=bed_user.get('referral_code'),
-                balance=balance_usd,
-                preferred_currency='rub',  # Отображать в рублях, без искажения курсом
+                balance=bed_user.get('balance_kopeks', 0) / 100.0,  # Конвертируем копейки в рубли
                 preferred_lang=bed_user.get('language', 'ru'),
                 trial_used=bed_user.get('has_had_paid_subscription', False),
                 created_at=datetime.fromisoformat(bed_user['created_at'].replace('Z', '+00:00')) if bed_user.get('created_at') else datetime.now(timezone.utc)
@@ -415,20 +406,9 @@ def main():
         print(f"❌ Ошибка при загрузке бекапа: {e}")
         sys.exit(1)
     
-    # Создаем Flask приложение (init_app вызывается внутри)
+    # Создаем Flask приложение
     app, db_path = create_app_for_migration()
-
-    # Импорт моделей только после init_app(), иначе get_db() падает при загрузке модулей
-    from modules.models import (
-        User, Payment, Tariff, PromoCode, Ticket, TicketMessage,
-        UserConfig,
-    )
-    # Чтобы migrate_users/migrate_payments/... видели модели, записываем в глобальное пространство модуля
-    globals().update({
-        'User': User, 'Payment': Payment, 'Tariff': Tariff, 'PromoCode': PromoCode,
-        'Ticket': Ticket, 'TicketMessage': TicketMessage, 'UserConfig': UserConfig,
-    })
-
+    
     # Проверяем существование базы данных
     if os.path.exists(db_path) and not args.force:
         response = input(f"\n⚠️  База данных {db_path} уже существует. Перезаписать? (y/N): ")

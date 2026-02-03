@@ -11,7 +11,7 @@ class CurrencyRate(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     currency = db.Column(db.String(10), unique=True, nullable=False)  # 'UAH', 'RUB', 'USD'
     rate_to_usd = db.Column(db.Float, nullable=False)  # Курс к USD
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 def get_currency_rate(currency):

@@ -382,7 +382,10 @@ def available_payment_methods():
                 available.append('kassa_ai')
             except ValueError:
                 pass
-        
+
+        # Оплата с баланса — всегда доступна для тарифов и опций (обрабатывается отдельными endpoint'ами)
+        available.append('balance')
+
         return jsonify({"available_methods": available}), 200
         
     except Exception as e:

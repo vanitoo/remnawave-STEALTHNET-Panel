@@ -171,7 +171,7 @@
     "why_title": "为什么需要这个？",
     "why_item1": "如果 Telegram 在您的国家被阻止，请获得访问权限",
     "why_item2": "通过我们的代理服务器实现快速稳定的连接",
-    "why_item3": "所有 StealthNET 用户免费",
+    "why_item3": "所有 {{serviceName}} 用户免费",
     "why_item4": "自动设置 - 只需点击按钮",
     "note": "注意：如果按钮不起作用，请在移动设备的浏览器中打开此页面，然后再次点击按钮。",
     "hero_title": "无限制使用 Telegram",
@@ -234,7 +234,7 @@
     "linux_step7": "输入代理服务器详细信息并点击\"保存\"",
     "linux_step8": "启用\"使用代理\"开关",
     "info_title": "重要信息",
-    "info_item1": "代理服务器免费提供给所有 StealthNET 用户",
+    "info_item1": "代理服务器免费提供给所有 {{serviceName}} 用户",
     "info_item2": "建议使用 SOCKS5 以获得更好的性能",
     "info_item3": "配置代理后，所有 Telegram 连接都将通过我们的服务器",
     "info_item4": "如果代理不工作，请尝试切换到另一种类型 (SOCKS5 ↔ HTTP)"

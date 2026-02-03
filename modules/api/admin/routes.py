@@ -40,11 +40,21 @@ from modules.models.auto_broadcast import AutoBroadcastMessage, AutoBroadcastSet
 from modules.models.trial import TrialSettings
 from modules.models.tariff_level import TariffLevel
 from modules.models.option import PurchaseOption
+from modules.models.email_setting import EmailSetting
 
 app = get_app()
 db = get_db()
 cache = get_cache()
 bcrypt = get_bcrypt()
+
+
+def _get_site_name():
+    """Имя сервиса из брендинга для fallback."""
+    try:
+        b = BrandingSetting.query.first()
+        return (b.site_name or "").strip() if b else ""
+    except Exception:
+        return ""
 
 
 def get_remnawave_headers():
@@ -2325,6 +2335,63 @@ def admin_branding_settings(current_admin):
 
 
 # ============================================================================
+# EMAIL SETTINGS (шаблоны писем и имя отправителя)
+# ============================================================================
+
+def _read_default_email_template(template_name):
+    """Прочитать содержимое шаблона из папки templates (для «по умолчанию»)."""
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        path = os.path.join(root, 'templates', template_name)
+        if os.path.isfile(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                return f.read()
+    except Exception:
+        pass
+    return ""
+
+
+@app.route('/api/admin/email-settings', methods=['GET', 'POST'])
+@admin_required
+def admin_email_settings(current_admin):
+    """Настройки почты: имя отправителя и шаблоны писем (верификация, рассылка)."""
+    es = EmailSetting.query.first()
+    if not es:
+        es = EmailSetting(id=1)
+        db.session.add(es)
+        db.session.commit()
+
+    if request.method == 'GET':
+        default_verification = _read_default_email_template('email_verification.html')
+        default_broadcast = _read_default_email_template('email_broadcast.html')
+        return jsonify({
+            "mail_sender_name": es.mail_sender_name or "",
+            "verification_subject": es.verification_subject or "Подтвердите email",
+            "verification_body_html": es.verification_body_html or "",
+            "broadcast_body_html": es.broadcast_body_html or "",
+            "default_verification_body_html": default_verification,
+            "default_broadcast_body_html": default_broadcast,
+        }), 200
+
+    # POST
+    try:
+        data = request.json or {}
+        if "mail_sender_name" in data:
+            es.mail_sender_name = (data["mail_sender_name"] or "").strip() or None
+        if "verification_subject" in data:
+            es.verification_subject = (data["verification_subject"] or "").strip() or None
+        if "verification_body_html" in data:
+            es.verification_body_html = (data["verification_body_html"] or "").strip() or None
+        if "broadcast_body_html" in data:
+            es.broadcast_body_html = (data["broadcast_body_html"] or "").strip() or None
+        db.session.commit()
+        return jsonify({"message": "Email settings saved"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": str(e)}), 500
+
+
+# ============================================================================
 # BOT CONFIG
 # ============================================================================
 
@@ -2341,7 +2408,7 @@ def admin_bot_config_endpoint(current_admin):
     if request.method == 'GET':
         default_buttons_order = ["trial", "connect", "status", "tariffs", "options", "referrals", "support", "settings", "webapp"]
         return jsonify({
-            "service_name": config.service_name or "StealthNET",
+            "service_name": config.service_name or _get_site_name() or "Панель",
             "bot_username": config.bot_username or "",
             "support_url": config.support_url or "",
             "support_bot_username": config.support_bot_username or "",
@@ -2384,6 +2451,7 @@ def admin_bot_config_endpoint(current_admin):
             "channel_subscription_text_cn": getattr(config, 'channel_subscription_text_cn', '') or "",
             "bot_link_for_miniapp": getattr(config, 'bot_link_for_miniapp', '') or "",
             "buttons_order": json.loads(config.buttons_order) if hasattr(config, 'buttons_order') and config.buttons_order else default_buttons_order,
+            "bot_page_logos": json.loads(config.bot_page_logos) if getattr(config, 'bot_page_logos', None) else {},
             "updated_at": config.updated_at.isoformat() if config.updated_at else None
         }), 200
     
@@ -2440,7 +2508,7 @@ def admin_bot_config_endpoint(current_admin):
                     setattr(config, field, data[field])
         
         # JSON поля
-        json_fields = ['translations_ru', 'translations_ua', 'translations_en', 'translations_cn', 'buttons_order']
+        json_fields = ['translations_ru', 'translations_ua', 'translations_en', 'translations_cn', 'buttons_order', 'bot_page_logos']
         for field in json_fields:
             if field in data:
                 setattr(config, field, json.dumps(data[field], ensure_ascii=False) if data[field] else None)
@@ -2471,6 +2539,99 @@ def admin_bot_config_endpoint(current_admin):
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "Internal Server Error"}), 500
+
+
+# Ключи страниц бота для логотипов (для загрузки и отображения в админке)
+BOT_LOGO_PAGE_KEYS = [
+    ("default", "По умолчанию (общий логотип)"),
+    ("main_menu", "Главное меню"),
+    ("subscription_status", "Статус подписки"),
+    ("subscription_menu", "Моя подписка"),
+    ("tariffs", "Тарифы"),
+    ("options", "Опции"),
+    ("referrals", "Рефералка"),
+    ("support_menu", "Поддержка"),
+    ("settings", "Настройки"),
+    ("topup", "Пополнение баланса"),
+    ("configs", "Конфиги"),
+    ("servers", "Серверы"),
+    ("agreement", "Соглашение"),
+    ("offer", "Оферта"),
+    ("payment", "Оплата"),
+    ("trial", "Триал"),
+    ("start", "Приветствие /start"),
+]
+
+
+@app.route('/api/admin/bot-logos', methods=['GET'])
+@admin_required
+def admin_bot_logos_list(current_admin):
+    """Список страниц и текущих логотипов бота"""
+    config = BotConfig.query.first()
+    logos = {}
+    if config and getattr(config, 'bot_page_logos', None):
+        try:
+            logos = json.loads(config.bot_page_logos)
+        except Exception:
+            logos = {}
+    return jsonify({
+        "pages": [{"key": k, "label": v} for k, v in BOT_LOGO_PAGE_KEYS],
+        "bot_page_logos": logos
+    }), 200
+
+
+@app.route('/api/admin/bot-logos/upload', methods=['POST'])
+@admin_required
+def admin_bot_logos_upload(current_admin):
+    """Загрузка логотипа для страницы бота. Form: page_key, file (image)"""
+    page_key = (request.form.get('page_key') or '').strip()
+    if not page_key:
+        return jsonify({"message": "page_key is required"}), 400
+    allowed = {k for k, _ in BOT_LOGO_PAGE_KEYS}
+    if page_key not in allowed:
+        return jsonify({"message": f"Invalid page_key. Allowed: {sorted(allowed)}"}), 400
+    if 'file' not in request.files and 'logo' not in request.files:
+        return jsonify({"message": "file or logo is required"}), 400
+    file = request.files.get('file') or request.files.get('logo')
+    if not file or file.filename == '':
+        return jsonify({"message": "No file selected"}), 400
+    ext = os.path.splitext(file.filename)[1].lower() or '.png'
+    if ext not in ('.png', '.jpg', '.jpeg', '.webp', '.gif'):
+        ext = '.png'
+    # Корень проекта (client_bot.py ищет логотипы в project_root/instance/uploads/bot_logos)
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    upload_dir = os.path.join(root, 'instance', 'uploads', 'bot_logos')
+    os.makedirs(upload_dir, exist_ok=True)
+    safe_key = page_key.replace('/', '_').replace('..', '')
+    filename = f"{safe_key}{ext}"
+    filepath = os.path.join(upload_dir, filename)
+    try:
+        file.save(filepath)
+    except Exception as e:
+        return jsonify({"message": f"Failed to save file: {str(e)}"}), 500
+    relative_path = os.path.join('instance', 'uploads', 'bot_logos', filename).replace('\\', '/')
+    config = BotConfig.query.first()
+    if not config:
+        config = BotConfig(id=1)
+        db.session.add(config)
+        db.session.flush()
+    logos = {}
+    if getattr(config, 'bot_page_logos', None):
+        try:
+            logos = json.loads(config.bot_page_logos)
+        except Exception:
+            pass
+    logos[page_key] = relative_path
+    config.bot_page_logos = json.dumps(logos, ensure_ascii=False)
+    db.session.commit()
+    try:
+        if 'client_bot' in __import__('sys').modules:
+            cb = __import__('sys').modules.get('client_bot')
+            if cb and getattr(cb, 'clear_bot_config_cache', None):
+                cb.clear_bot_config_cache()
+    except Exception:
+        pass
+    return jsonify({"message": "Logo uploaded", "page_key": page_key, "path": relative_path}), 200
 
 
 # ============================================================================
@@ -3500,39 +3661,46 @@ def send_broadcast(current_admin):
         import threading
         from flask_mail import Message
         from modules.core import get_mail
-        
-        def send_email_background(email, subj, msg):
-            """Отправить email в фоновом режиме"""
+        from modules.email_utils import get_mail_sender, get_broadcast_html
+
+        # HTML письма рассылки из шаблона (настройки почты или файл)
+        email_html_body = get_broadcast_html(subject, message) if broadcast_type in ['email', 'both'] else None
+
+        def send_email_background(email, subj, html_body):
+            """Отправить email в фоновом режиме (имя отправителя из настроек почты)."""
             with app.app_context():
                 try:
                     mail_obj = get_mail()
                     m = Message(subj, recipients=[email])
-                    m.html = msg
+                    m.html = html_body
+                    sender = get_mail_sender()
+                    if sender:
+                        m.sender = sender
                     mail_obj.send(m)
                     return True
                 except Exception as e:
                     print(f"Failed to send email to {email}: {e}")
                     return False
-        
+
         # Формируем текст для Telegram
         telegram_text = f"<b>{subject}</b>\n\n{message}" if subject else message
-        
+
         # Отправляем сообщения
         for user in recipients:
             # Email рассылка
             if broadcast_type in ['email', 'both']:
                 if user.email and not user.email.endswith('@telegram.local'):
-                    def send_email_wrapper(u, subj, msg):
+                    def send_email_wrapper(u, subj, html_body):
                         nonlocal email_sent, email_failed, failed_emails
-                        if send_email_background(u.email, subj, msg):
+                        if send_email_background(u.email, subj, html_body):
                             email_sent += 1
                         else:
                             email_failed += 1
                             failed_emails.append(u.email)
-                    
+
                     threading.Thread(
                         target=send_email_wrapper,
-                        args=(user, subject, message)
+                        args=(user, subject, email_html_body)
                     ).start()
             
             # Telegram рассылка
@@ -3979,10 +4147,12 @@ def auto_broadcast_settings_endpoint(current_admin):
 @app.route('/api/admin/bot-config/default-translations', methods=['GET'])
 @admin_required
 def get_default_translations(current_admin):
-    """Дефолтные переводы бота"""
+    """Дефолтные переводы бота. Ключи кнопок включают смайлик — его можно менять в конструкторе."""
     default_translations = {
         "ru": {
             "main_menu": "Главное меню",
+            "main_menu_button": "🔙 Главное меню",
+            "back": "🔙 Назад",
             "welcome_bot": "Добро пожаловать в {SERVICE_NAME} VPN Bot!",
             "welcome_user": "Добро пожаловать",
             "stealthnet_bot": "{SERVICE_NAME} VPN Bot",
@@ -3996,26 +4166,46 @@ def get_default_translations(current_admin):
             "traffic_title": "Трафик",
             "unlimited_traffic": "Безлимитный",
             "days": "дней",
-            "connect_button": "Подключиться к VPN",
-            "activate_trial_button": "Активировать триал",
-            "status_button": "Моя подписка",
-            "tariffs_button": "Тарифы",
-            "options_button": "Опции",
-            "servers_button": "Серверы",
-            "referrals_button": "Рефералка",
-            "support_button": "Поддержка",
-            "support_bot_button": "Бот Поддержки",
-            "administration_button": "Администрация",
-            "settings_button": "Настройки",
-            "top_up_balance": "Пополнить баланс",
-            "cabinet_button": "Web Кабинет",
+            "connect_button": "🚀 Подключиться к VPN",
+            "activate_trial_button": "💡 Активировать триал",
+            "status_button": "📊 Моя подписка",
+            "tariffs_button": "💎 Тарифы",
+            "options_button": "📦 Опции",
+            "servers_button": "🌐 Серверы",
+            "referrals_button": "🎁 Рефералка",
+            "support_button": "💬 Поддержка",
+            "contact_support_button": "💬 Связаться с поддержкой",
+            "support_bot_button": "🤖 Бот Поддержки",
+            "administration_button": "👮 Администрация",
+            "settings_button": "⚙️ Настройки",
+            "top_up_balance": "💰 Пополнить баланс",
+            "cabinet_button": "📱 Web Кабинет",
+            "configs_button": "🧩 Подписки",
             "webapp_button": "Web-приложение",
-            "user_agreement_button": "Соглашение",
+            "user_agreement_button": "📄 Соглашение",
             "agreement_button": "Соглашение",
-            "offer_button": "Оферта"
+            "offer_button": "📋 Оферта",
+            "select_tariff_button": "💎 Выбрать тариф",
+            "copy_link": "📋 Копировать ссылку",
+            "create_ticket_button": "➕ Создать тикет",
+            "go_to_payment_button": "💳 Перейти к оплате",
+            "enter_custom_amount": "✏️ Ввести свою сумму",
+            "reply_button": "💬 Ответить",
+            "back_to_support": "🔙 К поддержке",
+            "back_to_tariffs": "🔙 К тарифам",
+            "back_to_type": "🔙 К выбору типа",
+            "try_again_button": "🔙 Попробовать снова",
+            "copy_token_button": "📋 Скопировать токен",
+            "my_configs_button": "🧩 Мои подписки",
+            "new_subscription_button": "➕ Новая подписка",
+            "extend_button": "💎 Продлить",
+            "share_button": "📤 Поделиться",
+            "language": "🌐 Язык"
         },
         "en": {
             "main_menu": "Main Menu",
+            "main_menu_button": "🔙 Main Menu",
+            "back": "🔙 Back",
             "welcome_bot": "Welcome to {SERVICE_NAME} VPN Bot!",
             "welcome_user": "Welcome",
             "stealthnet_bot": "{SERVICE_NAME} VPN Bot",
@@ -4029,26 +4219,46 @@ def get_default_translations(current_admin):
             "traffic_title": "Traffic",
             "unlimited_traffic": "Unlimited",
             "days": "days",
-            "connect_button": "Connect to VPN",
-            "activate_trial_button": "Activate Trial",
-            "status_button": "My Subscription",
-            "tariffs_button": "Tariffs",
-            "options_button": "Options",
-            "servers_button": "Servers",
-            "referrals_button": "Referrals",
-            "support_button": "Support",
-            "support_bot_button": "Support Bot",
-            "administration_button": "Administration",
-            "settings_button": "Settings",
-            "top_up_balance": "Top Up Balance",
-            "cabinet_button": "Web Cabinet",
+            "connect_button": "🚀 Connect to VPN",
+            "activate_trial_button": "💡 Activate Trial",
+            "status_button": "📊 My Subscription",
+            "tariffs_button": "💎 Tariffs",
+            "options_button": "📦 Options",
+            "servers_button": "🌐 Servers",
+            "referrals_button": "🎁 Referrals",
+            "support_button": "💬 Support",
+            "contact_support_button": "💬 Contact Support",
+            "support_bot_button": "🤖 Support Bot",
+            "administration_button": "👮 Administration",
+            "settings_button": "⚙️ Settings",
+            "top_up_balance": "💰 Top Up Balance",
+            "cabinet_button": "📱 Web Cabinet",
+            "configs_button": "🧩 Subscriptions",
             "webapp_button": "Web App",
-            "user_agreement_button": "Agreement",
+            "user_agreement_button": "📄 Agreement",
             "agreement_button": "Agreement",
-            "offer_button": "Offer"
+            "offer_button": "📋 Offer",
+            "select_tariff_button": "💎 Select Tariff",
+            "copy_link": "📋 Copy Link",
+            "create_ticket_button": "➕ Create Ticket",
+            "go_to_payment_button": "💳 Go to Payment",
+            "enter_custom_amount": "✏️ Enter Custom Amount",
+            "reply_button": "💬 Reply",
+            "back_to_support": "🔙 To Support",
+            "back_to_tariffs": "🔙 To Tariffs",
+            "back_to_type": "🔙 Back to Type Selection",
+            "try_again_button": "🔙 Try Again",
+            "copy_token_button": "📋 Copy Token",
+            "my_configs_button": "🧩 My Subscriptions",
+            "new_subscription_button": "➕ New Subscription",
+            "extend_button": "💎 Extend",
+            "share_button": "📤 Share",
+            "language": "🌐 Language"
         },
         "ua": {
             "main_menu": "Головне меню",
+            "main_menu_button": "🔙 Головне меню",
+            "back": "🔙 Назад",
             "welcome_bot": "Ласкаво просимо до {SERVICE_NAME} VPN Bot!",
             "welcome_user": "Ласкаво просимо",
             "stealthnet_bot": "{SERVICE_NAME} VPN Bot",
@@ -4062,26 +4272,46 @@ def get_default_translations(current_admin):
             "traffic_title": "Трафік",
             "unlimited_traffic": "Безлімітний",
             "days": "днів",
-            "connect_button": "Підключитися до VPN",
-            "activate_trial_button": "Активувати тріал",
-            "status_button": "Моя підписка",
-            "tariffs_button": "Тарифи",
-            "options_button": "Опції",
-            "servers_button": "Сервери",
-            "referrals_button": "Рефералка",
-            "support_button": "Підтримка",
-            "support_bot_button": "Бот Підтримки",
-            "administration_button": "Адміністрація",
-            "settings_button": "Налаштування",
-            "top_up_balance": "Поповнити баланс",
-            "cabinet_button": "Web Кабінет",
+            "connect_button": "🚀 Підключитися до VPN",
+            "activate_trial_button": "💡 Активувати тріал",
+            "status_button": "📊 Моя підписка",
+            "tariffs_button": "💎 Тарифи",
+            "options_button": "📦 Опції",
+            "servers_button": "🌐 Сервери",
+            "referrals_button": "🎁 Рефералка",
+            "support_button": "💬 Підтримка",
+            "contact_support_button": "💬 Зв'язатися з підтримкою",
+            "support_bot_button": "🤖 Бот Підтримки",
+            "administration_button": "👮 Адміністрація",
+            "settings_button": "⚙️ Налаштування",
+            "top_up_balance": "💰 Поповнити баланс",
+            "cabinet_button": "📱 Web Кабінет",
+            "configs_button": "🧩 Підписки",
             "webapp_button": "Web-додаток",
-            "user_agreement_button": "Угода",
+            "user_agreement_button": "📄 Угода",
             "agreement_button": "Угода",
-            "offer_button": "Оферта"
+            "offer_button": "📋 Оферта",
+            "select_tariff_button": "💎 Обрати тариф",
+            "copy_link": "📋 Копіювати посилання",
+            "create_ticket_button": "➕ Створити тікет",
+            "go_to_payment_button": "💳 Перейти до оплати",
+            "enter_custom_amount": "✏️ Ввести суму",
+            "reply_button": "💬 Відповісти",
+            "back_to_support": "🔙 До підтримки",
+            "back_to_tariffs": "🔙 До тарифів",
+            "back_to_type": "🔙 До вибору типу",
+            "try_again_button": "🔙 Спробувати знову",
+            "copy_token_button": "📋 Скопіювати токен",
+            "my_configs_button": "🧩 Мої підписки",
+            "new_subscription_button": "➕ Нова підписка",
+            "extend_button": "💎 Продовжити",
+            "share_button": "📤 Поділитися",
+            "language": "🌐 Мова"
         },
         "cn": {
             "main_menu": "主菜单",
+            "main_menu_button": "🔙 主菜单",
+            "back": "🔙 返回",
             "welcome_bot": "欢迎使用 {SERVICE_NAME} VPN Bot!",
             "welcome_user": "欢迎",
             "stealthnet_bot": "{SERVICE_NAME} VPN Bot",
@@ -4095,23 +4325,41 @@ def get_default_translations(current_admin):
             "traffic_title": "流量",
             "unlimited_traffic": "无限制",
             "days": "天",
-            "connect_button": "连接VPN",
-            "activate_trial_button": "激活试用",
-            "status_button": "我的订阅",
-            "tariffs_button": "资费",
-            "options_button": "选项",
-            "servers_button": "服务器",
-            "referrals_button": "推荐",
-            "support_button": "支持",
-            "support_bot_button": "支持机器人",
-            "administration_button": "管理",
-            "settings_button": "设置",
-            "top_up_balance": "充值",
-            "cabinet_button": "Web кабинет",
+            "connect_button": "🚀 连接VPN",
+            "activate_trial_button": "💡 激活试用",
+            "status_button": "📊 我的订阅",
+            "tariffs_button": "💎 资费",
+            "options_button": "📦 选项",
+            "servers_button": "🌐 服务器",
+            "referrals_button": "🎁 推荐",
+            "support_button": "💬 支持",
+            "contact_support_button": "💬 联系支持",
+            "support_bot_button": "🤖 支持机器人",
+            "administration_button": "👮 管理",
+            "settings_button": "⚙️ 设置",
+            "top_up_balance": "💰 充值",
+            "cabinet_button": "📱 Web кабинет",
+            "configs_button": "🧩 订阅",
             "webapp_button": "Web应用",
-            "user_agreement_button": "协议",
+            "user_agreement_button": "📄 协议",
             "agreement_button": "协议",
-            "offer_button": "报价"
+            "offer_button": "📋 报价",
+            "select_tariff_button": "💎 选择资费",
+            "copy_link": "📋 复制链接",
+            "create_ticket_button": "➕ 创建工单",
+            "go_to_payment_button": "💳 去支付",
+            "enter_custom_amount": "✏️ 输入金额",
+            "reply_button": "💬 回复",
+            "back_to_support": "🔙 返回支持",
+            "back_to_tariffs": "🔙 返回资费",
+            "back_to_type": "🔙 返回类型选择",
+            "try_again_button": "🔙 重试",
+            "copy_token_button": "📋 复制令牌",
+            "my_configs_button": "🧩 我的订阅",
+            "new_subscription_button": "➕ 新订阅",
+            "extend_button": "💎 续订",
+            "share_button": "📤 分享",
+            "language": "🌐 语言"
         }
     }
     return jsonify(default_translations), 200

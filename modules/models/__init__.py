@@ -21,6 +21,7 @@ from modules.models.option import PurchaseOption
 from modules.models.trial import TrialSettings
 from modules.models.user_config import UserConfig
 from modules.models.config_share import ConfigShareToken
+from modules.models.email_setting import EmailSetting
 
 __all__ = [
     'User',
@@ -38,5 +39,6 @@ __all__ = [
     'PurchaseOption',
     'TrialSettings',
     'UserConfig',
-    'ConfigShareToken'
+    'ConfigShareToken',
+    'EmailSetting'
 ]

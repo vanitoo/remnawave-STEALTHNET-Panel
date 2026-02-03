@@ -3,7 +3,7 @@ Monobank - платёжная система (Украина)
 https://api.monobank.ua/
 """
 import requests
-from modules.api.payments.base import get_payment_settings, decrypt_key, get_callback_url, get_return_url
+from modules.api.payments.base import get_payment_settings, decrypt_key, get_callback_url, get_return_url, get_service_name_for_payment
 
 
 def create_monobank_payment(amount: float, currency: str, order_id: str, **kwargs):
@@ -35,7 +35,7 @@ def create_monobank_payment(amount: float, currency: str, order_id: str, **kwarg
             "ccy": 980,  # UAH ISO код
             "merchantPaymInfo": {
                 "reference": order_id,
-                "destination": f"Подписка StealthNET #{order_id}"
+                "destination": f"Подписка {get_service_name_for_payment()} #{order_id}"
             },
             "redirectUrl": get_return_url(kwargs.get('source', 'miniapp'), kwargs.get('miniapp_type', 'v2')),
             "webHookUrl": get_callback_url('monobank'),

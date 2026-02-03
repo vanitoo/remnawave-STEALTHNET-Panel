@@ -447,6 +447,9 @@ def process_successful_payment(payment, user, tariff):
         current_expire = user_data.get('expireAt')
         current_squads = user_data.get('activeInternalSquads', [])
         
+        # Дни по тарифу: базовые + бонусные (чётко начисляются при оплате)
+        days_to_add = tariff.duration_days + (getattr(tariff, 'bonus_days', None) or 0)
+
         if current_expire:
             # Обработка формата с 'Z'
             if isinstance(current_expire, str) and current_expire.endswith('Z'):
@@ -454,9 +457,9 @@ def process_successful_payment(payment, user, tariff):
             current_expire_dt = datetime.fromisoformat(current_expire)
             if current_expire_dt.tzinfo is None:
                 current_expire_dt = current_expire_dt.replace(tzinfo=timezone.utc)
-            new_expire_dt = max(datetime.now(timezone.utc), current_expire_dt) + timedelta(days=tariff.duration_days)
+            new_expire_dt = max(datetime.now(timezone.utc), current_expire_dt) + timedelta(days=days_to_add)
         else:
-            new_expire_dt = datetime.now(timezone.utc) + timedelta(days=tariff.duration_days)
+            new_expire_dt = datetime.now(timezone.utc) + timedelta(days=days_to_add)
         
         # Получаем список сквадов из тарифа
         squad_ids = []

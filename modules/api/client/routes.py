@@ -28,10 +28,17 @@ from modules.currency import convert_from_usd, convert_to_usd, parse_iso_datetim
 from modules.models.tariff import Tariff
 from modules.models.payment import Payment, PaymentSetting
 from modules.models.option import PurchaseOption
+from modules.models.branding import BrandingSetting
 from modules.core import get_fernet
 from modules.api.payments.base import decrypt_key, get_return_url
 
 app = get_app()
+
+
+def _get_site_name():
+    """Название сервиса из брендинга для описаний платежей."""
+    b = BrandingSetting.query.first()
+    return (b.site_name or '').strip() if b else ''
 
 # Глобальная сессия для Platega (сохранение cookies для обхода DDoS-Guard)
 _platega_session = None
@@ -1607,6 +1614,8 @@ def create_payment():
     user = get_user_from_token()
     if not user:
         return jsonify({"message": "Auth Error"}), 401
+
+    service_name = _get_site_name() or 'Панель'
     
     try:
         request_source = (request.json.get('source') if request.json else None) or (request.json.get('payment_source') if request.json else None) or 'website'
@@ -1746,7 +1755,7 @@ def create_payment():
                     amount=float(amount),
                     currency='RUB',
                     order_id=order_id,
-                    description=f"Пополнение баланса StealthNET #{order_id}",
+                    description=f"Пополнение баланса {service_name} #{order_id}",
                     source='website'
                 )
 
@@ -1772,7 +1781,7 @@ def create_payment():
                     stars_amount = 1
                 
                 invoice_payload = {
-                    "title": "Пополнение баланса StealthNET",
+                    "title": f"Пополнение баланса {service_name}",
                     "description": f"Пополнение баланса на сумму {float(amount):.2f} {cp_currency}",
                     "payload": order_id,
                     "provider_token": "",
@@ -2213,7 +2222,7 @@ def create_payment():
                     currency='RUB',
                     order_id=order_id,
                     user_email=user.email,
-                    description=f"Подписка StealthNET - {t.name} ({t.duration_days} дней)",
+                    description=f"Подписка {service_name} - {t.name} ({t.duration_days} дней)",
                     source='website'  # Платеж с сайта, возврат на сайт
                 )
                 
@@ -2232,7 +2241,7 @@ def create_payment():
                     amount=final_amount,
                     currency='RUB',
                     order_id=order_id,
-                    description=f"Подписка StealthNET - {t.name} ({t.duration_days} дней)",
+                    description=f"Подписка {service_name} - {t.name} ({t.duration_days} дней)",
                     source='website'
                 )
 
@@ -2258,7 +2267,7 @@ def create_payment():
                     stars_amount = 1
                 
                 invoice_payload = {
-                    "title": f"Подписка StealthNET - {t.name}",
+                    "title": f"Подписка {service_name} - {t.name}",
                     "description": f"Подписка на {t.duration_days} дней",
                     "payload": order_id,
                     "provider_token": "",
@@ -2311,8 +2320,8 @@ def create_payment():
                 from modules.api.payments.base import get_callback_url
                 payment_url, payment_system_id = create_payment_provider(
                     provider='kassa_ai',
-                    amount=float(amount),
-                    currency=currency,
+                    amount=float(final_amount),
+                    currency=info['c'],
                     order_id=order_id,
                     user_email=user.email if user else None,
                     ip=request.remote_addr,
@@ -2351,7 +2360,7 @@ def create_payment():
                 payload = {
                     "amount": final_amount,
                     "currency_code": info['c'],
-                    "description": f"Подписка StealthNET - {t.name}",
+                    "description": f"Подписка {service_name} - {t.name}",
                     "paid_btn_name": "callback",
                     "paid_btn_url": f"{YOUR_SERVER_IP_OR_DOMAIN}/dashboard/subscription"
                 }
@@ -2391,7 +2400,7 @@ def create_payment():
                     "ccy": currency_code,
                     "merchantPaymInfo": {
                         "reference": order_id,
-                        "destination": f"Подписка StealthNET - {t.name}",
+                        "destination": f"Подписка {service_name} - {t.name}",
                         "comment": f"Подписка на {t.duration_days} дней"
                     },
                     "redirectUrl": redirect_url,
@@ -2639,7 +2648,7 @@ def create_payment():
                     "amount": str(final_amount),
                     "uuid": order_id,
                     "shopId": shop_id_int,
-                    "description": f"Подписка StealthNET - {t.name} ({t.duration_days} дней)",
+                    "description": f"Подписка {service_name} - {t.name} ({t.duration_days} дней)",
                     "subscribe": None,
                     "holdTime": None
                 }
@@ -2696,7 +2705,7 @@ def create_payment():
                     "amount": str(final_amount),
                     "uuid": order_id,
                     "shopId": shop_id_int,
-                    "description": f"Подписка StealthNET - {t.name} ({t.duration_days} дней)",
+                    "description": f"Подписка {service_name} - {t.name} ({t.duration_days} дней)",
                     "subscribe": None,
                     "holdTime": None
                 }

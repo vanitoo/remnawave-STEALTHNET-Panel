@@ -64,26 +64,31 @@ def get_remnawave_headers(additional_headers=None):
     return headers, cookies
 
 
-def send_email_in_background(app_context, recipient, subject, html_body):
-    """Отправка email в фоновом режиме"""
+def send_email_in_background(app_context, recipient, subject, html_body, sender=None):
+    """Отправка email в фоновом режиме. sender=(name, email) — из настроек почты, если не передан."""
     with app_context:
         try:
             from flask import current_app
             from flask_mail import Message
-            
+            from modules.email_utils import get_mail_sender
+
             mail_server = current_app.config.get('MAIL_SERVER')
             mail_username = current_app.config.get('MAIL_USERNAME')
             mail_password = current_app.config.get('MAIL_PASSWORD')
-            
+
             if not all([mail_server, mail_username, mail_password]):
                 app.logger.warning(f"[EMAIL] Mail not configured - MAIL_SERVER: {bool(mail_server)}, MAIL_USERNAME: {bool(mail_username)}, MAIL_PASSWORD: {bool(mail_password)}")
                 return
-            
+
             msg = Message(subject, recipients=[recipient])
             msg.html = html_body
+            if sender is None:
+                sender = get_mail_sender()
+            if sender:
+                msg.sender = sender
             mail.send(msg)
             app.logger.info(f"[EMAIL] ✓ Sent to {recipient}")
-            
+
         except Exception as e:
             app.logger.error(f"[EMAIL] ❌ Error sending email to {recipient}: {e}", exc_info=True)
 
@@ -128,14 +133,14 @@ def public_register():
     # Проверяем существование по email
     existing_user = User.query.filter_by(email=email).first()
     if existing_user:
-        return jsonify({"message": "User exists"}), 400
-    
+        return jsonify({"message": "Пользователь с таким email уже зарегистрирован"}), 400
+
     # Если указан telegram_id, проверяем, не занят ли он
     if telegram_id:
         telegram_id_str = str(telegram_id)
         existing_telegram_user = User.query.filter_by(telegram_id=telegram_id_str).first()
         if existing_telegram_user:
-            return jsonify({"message": "Telegram account already registered"}), 400
+            return jsonify({"message": "Этот аккаунт Telegram уже привязан к другому пользователю"}), 400
 
     hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
     clean_username = email.replace("@", "_").replace(".", "_")
@@ -193,14 +198,14 @@ def public_register():
             remnawave_uuid = resp.json().get('response', {}).get('uuid')
 
         if not remnawave_uuid:
-            return jsonify({"message": "Provider Error"}), 500
+            return jsonify({"message": "Ошибка сервера. Попробуйте позже."}), 500
 
         verif_token = ''.join(random.choices(string.ascii_letters + string.digits, k=50))
         sys_settings = get_system_settings() or create_system_settings()
         
         if not sys_settings:
             print(f"Register Error: Failed to get or create system settings")
-            return jsonify({"message": "Internal Server Error"}), 500
+            return jsonify({"message": "Внутренняя ошибка сервера"}), 500
 
         new_user = User(
             email=email, password_hash=hashed_password, remnawave_uuid=remnawave_uuid,
@@ -233,15 +238,13 @@ def public_register():
                 your_server_ip = "https://testpanel.stealthnet.app"
 
             url = f"{your_server_ip}/verify?token={verif_token}"
-            # Получаем branding и service_name для шаблона
             branding = BrandingSetting.query.first()
             bot_config = BotConfig.query.first()
-            service_name = bot_config.service_name if bot_config else (branding.site_name if branding else "StealthNET")
-            html = render_template('email_verification.html', 
-                                 verification_url=url,
-                                 branding=branding,
-                                 service_name=service_name)
-            threading.Thread(target=send_email_in_background, args=(app.app_context(), email, "Подтвердите email", html)).start()
+            service_name = (bot_config.service_name if bot_config else None) or (branding.site_name if branding else None) or ""
+            from modules.email_utils import get_verification_html, get_verification_subject
+            html = get_verification_html(url, service_name=service_name)
+            subject = get_verification_subject()
+            threading.Thread(target=send_email_in_background, args=(app.app_context(), email, subject, html)).start()
         except Exception as e:
             print(f"Error preparing email: {e}")
             # Не прерываем регистрацию из-за ошибки email
@@ -267,13 +270,13 @@ def public_register():
         print(f"HTTP Error: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({"message": "Provider error"}), 500
+        return jsonify({"message": "Ошибка сервера. Попробуйте позже."}), 500
     except Exception as e:
         print(f"Register Error: {e}")
         import traceback
         traceback.print_exc()
         db.session.rollback()
-        return jsonify({"message": "Internal Server Error"}), 500
+        return jsonify({"message": "Внутренняя ошибка сервера"}), 500
 
 
 @app.route('/api/public/login', methods=['POST'])
@@ -284,13 +287,13 @@ def client_login():
     email, password = data.get('email'), data.get('password')
 
     if not isinstance(email, str) or not isinstance(password, str):
-        return jsonify({"message": "Invalid input"}), 400
+        return jsonify({"message": "Неверный формат данных. Введите email и пароль."}), 400
 
     try:
         user = User.query.filter_by(email=email).first()
         if not user:
-            return jsonify({"message": "Invalid credentials"}), 401
-        
+            return jsonify({"message": "Неверный email или пароль"}), 401
+
         # Если password_hash пустой, но есть telegram_id, это пользователь из бота
         # Разрешаем вход, но рекомендуем использовать Telegram Login Widget
         if not user.password_hash or user.password_hash == '':
@@ -298,22 +301,22 @@ def client_login():
                 # Пользователь зарегистрирован через бота, но может войти на сайте
                 # (например, через Telegram Login Widget или если пароль был установлен позже)
                 return jsonify({
-                    "message": "This account uses Telegram login. Please use Telegram Login Widget.",
+                    "message": "Этот аккаунт привязан к Telegram. Войдите через кнопку «Войти через Telegram».",
                     "code": "TELEGRAM_ACCOUNT",
                     "telegram_id": user.telegram_id
                 }), 401
             else:
-                return jsonify({"message": "This account uses Telegram login"}), 401
-        
+                return jsonify({"message": "Этот аккаунт привязан к Telegram. Войдите через Telegram."}), 401
+
         if not bcrypt.check_password_hash(user.password_hash, password):
-            return jsonify({"message": "Invalid credentials"}), 401
+            return jsonify({"message": "Неверный email или пароль"}), 401
         if not user.is_verified:
             return jsonify({"message": "Email не подтверждён", "code": "NOT_VERIFIED"}), 403
-        
+
         # Проверяем блокировку аккаунта
         if getattr(user, 'is_blocked', False):
             return jsonify({
-                "message": "Account blocked",
+                "message": "Аккаунт заблокирован",
                 "code": "ACCOUNT_BLOCKED",
                 "block_reason": getattr(user, 'block_reason', '') or "Ваш аккаунт заблокирован",
                 "blocked_at": user.blocked_at.isoformat() if hasattr(user, 'blocked_at') and user.blocked_at else None
@@ -322,7 +325,7 @@ def client_login():
         return jsonify({"token": create_local_jwt(user.id), "role": user.role}), 200
     except Exception as e:
         print(f"Login Error: {e}")
-        return jsonify({"message": "Internal Server Error"}), 500
+        return jsonify({"message": "Внутренняя ошибка сервера"}), 500
 
 
 @app.route('/api/public/forgot-password', methods=['POST', 'OPTIONS'])
@@ -341,7 +344,7 @@ def forgot_password():
         email = data.get('email', '').strip().lower()
 
         if not email:
-            return jsonify({"message": "Email is required"}), 400
+            return jsonify({"message": "Введите адрес электронной почты"}), 400
 
         user = User.query.filter_by(email=email).first()
         if not user:
@@ -355,7 +358,7 @@ def forgot_password():
             user = User.query.filter_by(telegram_id=telegram_id_str).first()
 
         if not user:
-            return jsonify({"message": "If this email exists, a password reset link has been sent"}), 200
+            return jsonify({"message": "Если такой email зарегистрирован, на него отправлено письмо с новым паролем."}), 200
 
         # Генерируем новый пароль
         import secrets
@@ -392,11 +395,11 @@ def forgot_password():
             daemon=True
         ).start()
 
-        return jsonify({"message": "If this email exists, a password reset link has been sent"}), 200
+        return jsonify({"message": "Если такой email зарегистрирован, на него отправлено письмо с новым паролем."}), 200
 
     except Exception as e:
         print(f"Forgot password error: {e}")
-        return jsonify({"message": "If this email exists, a password reset link has been sent"}), 200
+        return jsonify({"message": "Если такой email зарегистрирован, на него отправлено письмо с новым паролем."}), 200
 
 
 @app.route('/api/public/verify-email', methods=['POST'])
@@ -406,11 +409,11 @@ def verify_email():
     try:
         token = request.json.get('token')
         if not isinstance(token, str):
-            return jsonify({"message": "Invalid token"}), 400
+            return jsonify({"message": "Неверная ссылка"}), 400
 
         user = User.query.filter_by(verification_token=token).first()
         if not user:
-            return jsonify({"message": "Invalid or expired token"}), 404
+            return jsonify({"message": "Ссылка недействительна или устарела"}), 404
 
         user.is_verified = True
         user.verification_token = None
@@ -420,7 +423,7 @@ def verify_email():
         return jsonify({"message": "OK", "token": jwt_token, "role": user.role}), 200
 
     except Exception as e:
-        return jsonify({"message": "Internal Error"}), 500
+        return jsonify({"message": "Внутренняя ошибка сервера"}), 500
 
 
 @app.route('/api/public/resend-verification', methods=['POST'])
@@ -430,7 +433,7 @@ def resend_verification():
     try:
         email = request.json.get('email')
         if not isinstance(email, str):
-            return jsonify({"message": "Invalid email"}), 400
+            return jsonify({"message": "Введите корректный email"}), 400
 
         user = User.query.filter_by(email=email).first()
         if user and not user.is_verified:
@@ -447,20 +450,18 @@ def resend_verification():
                 your_server_ip = "https://testpanel.stealthnet.app"
 
             url = f"{your_server_ip}/verify?token={user.verification_token}"
-            # Получаем branding и service_name для шаблона
             branding = BrandingSetting.query.first()
             bot_config = BotConfig.query.first()
-            service_name = bot_config.service_name if bot_config else (branding.site_name if branding else "StealthNET")
-            html = render_template('email_verification.html', 
-                                 verification_url=url,
-                                 branding=branding,
-                                 service_name=service_name)
-            threading.Thread(target=send_email_in_background, args=(app.app_context(), email, "Verify Email", html)).start()
+            service_name = (bot_config.service_name if bot_config else None) or (branding.site_name if branding else None) or ""
+            from modules.email_utils import get_verification_html, get_verification_subject
+            html = get_verification_html(url, service_name=service_name)
+            subject = get_verification_subject()
+            threading.Thread(target=send_email_in_background, args=(app.app_context(), email, subject, html)).start()
 
-        return jsonify({"message": "Sent"}), 200
+        return jsonify({"message": "Письмо отправлено"}), 200
 
     except Exception as e:
-        return jsonify({"message": "Internal Error"}), 500
+        return jsonify({"message": "Внутренняя ошибка сервера"}), 500
 
 
 @app.route('/api/public/telegram-login', methods=['POST'])
@@ -483,7 +484,7 @@ def telegram_login():
 
     if not telegram_id or not hash_value:
         print(f"Telegram login error: missing data. telegram_id={telegram_id}, hash={bool(hash_value)}, data_keys={list(data.keys()) if data else 'no data'}")
-        return jsonify({"message": "Invalid Telegram data: missing id/telegram_id or hash"}), 400
+        return jsonify({"message": "Неверные данные Telegram. Отсутствует id или hash."}), 400
 
     try:
         # Конвертируем telegram_id в строку для поиска в БД (в модели хранится как строка)
@@ -493,7 +494,7 @@ def telegram_login():
         # Проверяем блокировку аккаунта
         if user and getattr(user, 'is_blocked', False):
             return jsonify({
-                "message": "Account blocked",
+                "message": "Аккаунт заблокирован",
                 "code": "ACCOUNT_BLOCKED",
                 "block_reason": getattr(user, 'block_reason', '') or "Ваш аккаунт заблокирован",
                 "blocked_at": user.blocked_at.isoformat() if hasattr(user, 'blocked_at') and user.blocked_at else None
@@ -539,14 +540,14 @@ def telegram_login():
                                 user.referral_code = generate_referral_code(user.id)
                                 db.session.commit()
                         else:
-                            return jsonify({"message": "User not found in bot"}), 404
+                            return jsonify({"message": "Пользователь не найден в боте"}), 404
                     else:
-                        return jsonify({"message": "User not found"}), 404
+                        return jsonify({"message": "Пользователь не найден"}), 404
                 except Exception as e:
                     print(f"Bot API Error: {e}")
-                    return jsonify({"message": "Bot API error"}), 500
+                    return jsonify({"message": "Ошибка API бота"}), 500
             else:
-                return jsonify({"message": "Bot API not configured"}), 500
+                return jsonify({"message": "API бота не настроен"}), 500
 
         if username and user.telegram_username != username:
             user.telegram_username = username
@@ -559,4 +560,4 @@ def telegram_login():
         print(f"Telegram Login Error: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({"message": "Internal Server Error"}), 500
+        return jsonify({"message": "Внутренняя ошибка сервера"}), 500

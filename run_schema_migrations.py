@@ -36,6 +36,7 @@ def run_all_schema_migrations(app=None):
         ('migration/schema/fix_referral_percent_default.py', 'migrate'),
         ('migration/schema/add_branding_fields.py', 'add_branding_fields'),
         ('migration/schema/add_bot_config_menu_fields.py', 'migrate'),
+        ('migration/schema/add_bot_page_logos.py', 'migrate'),
         ('migration/schema/add_favicon_url_to_branding.py', 'add_favicon_url_to_branding'),  # После add_branding_fields, на случай если favicon_url не был добавлен
         ('migration/schema/add_yookassa_receipt_field.py', 'add_yookassa_receipt_field'),
         ('migration/schema/add_yoomoney_fields.py', 'add_yoomoney_fields'),
@@ -54,6 +55,8 @@ def run_all_schema_migrations(app=None):
         ('migration/schema/add_user_config_id_to_payment.py', 'migrate'),  # Поле user_config_id в payment
         ('migration/schema/add_create_new_config_to_payment.py', 'migrate'),  # Поле create_new_config в payment
         ('migration/schema/add_purchase_options_table.py', 'add_purchase_options_table'),
+        ('migration/schema/add_config_share_token.py', 'migrate'),  # Таблица для обмена конфигами через inline режим
+        ('migration/schema/add_email_setting_table.py', 'migrate'),  # Таблица настроек почты (шаблоны писем, имя отправителя)
     ]
     
     success_count = 0

@@ -72,7 +72,10 @@ class BotConfig(db.Model):
     bot_link_for_miniapp = db.Column(db.String(500), nullable=True)
     buttons_order = db.Column(db.Text, nullable=True)
     
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    # Логотипы по страницам бота: JSON {"main_menu": "instance/uploads/bot_logos/main_menu.png", "tariffs": "...", "default": "..."}
+    bot_page_logos = db.Column(db.Text, nullable=True)
+    
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 def get_bot_config():

@@ -11,6 +11,7 @@ API эндпоинты Telegram Mini App
 
 from flask import request, jsonify
 from datetime import datetime, timezone, timedelta
+import math
 import requests
 import json
 import os
@@ -743,7 +744,7 @@ def miniapp_app_config():
         "config": {
             "additionalLocales": additional_locales if additional_locales else ["ru"],
             "branding": {
-                "name": "StealthNET",
+                "name": "",
                 "logoUrl": "",
                 "supportUrl": "https://t.me"
             }
@@ -757,11 +758,19 @@ def miniapp_app_config():
     try:
         branding = get_branding_settings()
         if branding:
-            config_data['config']['branding']['name'] = branding.site_name or "StealthNET"
+            config_data['config']['branding']['name'] = branding.site_name or ""
             if branding.logo_url:
                 config_data['config']['branding']['logoUrl'] = branding.logo_url
     except:
         pass
+
+    # Казино: показывать ли вкладку в мини-аппе (из ENV CASINO_ENABLED)
+    try:
+        config_data['config']['casino'] = {
+            'enabled': os.environ.get('CASINO_ENABLED', 'false').lower() == 'true'
+        }
+    except Exception:
+        config_data['config']['casino'] = {'enabled': False}
 
     response = jsonify(config_data)
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -2367,6 +2376,75 @@ def miniapp_purchase_option():
             return response, 400
 
         order_id = f"OPT-{uuid.uuid4().hex[:12].upper()}"
+
+        # Оплата с баланса — обрабатываем сразу, без внешнего провайдера
+        if payment_provider == 'balance':
+            from modules.currency import convert_to_usd, convert_from_usd
+            from modules.api.webhooks.routes import process_option_purchase
+
+            current_balance_usd = float(user.balance) if user.balance else 0.0
+            final_amount_usd = convert_to_usd(final_amount, currency_code)
+
+            if current_balance_usd < final_amount_usd:
+                current_balance_display = convert_from_usd(current_balance_usd, currency_code.lower() if currency_code else 'rub')
+                response = jsonify({
+                    "detail": {
+                        "title": "Insufficient Balance",
+                        "message": f"Insufficient balance. Required: {final_amount:.2f} {currency_code}, available: {current_balance_display:.2f} {currency_code}"
+                    }
+                })
+                response.headers.add('Access-Control-Allow-Origin', '*')
+                return response, 400
+
+            user.balance = current_balance_usd - final_amount_usd
+
+            payment_db = Payment(
+                order_id=order_id,
+                user_id=user.id,
+                tariff_id=None,
+                amount=final_amount,
+                currency=currency_code,
+                payment_provider='balance',
+                promo_code_id=None,
+                status='PENDING'
+            )
+            payment_db.description = f"OPTION:{option.id}"
+            try:
+                if config_id:
+                    payment_db.user_config_id = int(config_id)
+            except Exception:
+                pass
+
+            db.session.add(payment_db)
+            db.session.commit()
+
+            success = process_option_purchase(payment_db, user)
+            if success:
+                payment_db.status = 'PAID'
+                db.session.commit()
+                db.session.refresh(user)
+                response = jsonify({
+                    "payment_url": None,
+                    "payment_system_id": None,
+                    "order_id": order_id,
+                    "success": True,
+                    "message": "Option purchased successfully",
+                    "option_name": option.name,
+                    "amount": final_amount,
+                    "currency": currency_code,
+                    "balance": float(user.balance) if user.balance else 0.0
+                })
+            else:
+                user.balance = current_balance_usd
+                db.session.rollback()
+                response = jsonify({"detail": {"title": "Error", "message": "Failed to process option purchase"}})
+                response.headers.add('Access-Control-Allow-Origin', '*')
+                return response, 500
+
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            return response, 200
+
+        # Обычный платёжный провайдер
         payment_db = Payment(
             order_id=order_id,
             user_id=user.id,
@@ -2917,65 +2995,97 @@ def spin_wheel(chances):
 
 
 def get_user_days_remaining(user):
-    """Получить количество оставшихся дней подписки"""
+    """Получить количество оставшихся дней подписки (частичный день считаем как 1 день)."""
     if not user or not user.remnawave_uuid:
         return 0
-    
+
+    def days_from_expire(expire_at):
+        if not expire_at:
+            return 0
+        try:
+            if isinstance(expire_at, str):
+                expire_at = expire_at.replace('Z', '+00:00')
+            expire_date = datetime.fromisoformat(expire_at) if isinstance(expire_at, str) else expire_at
+            if hasattr(expire_date, 'tzinfo') and expire_date.tzinfo is None:
+                expire_date = expire_date.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            delta = expire_date - now
+            if delta.total_seconds() <= 0:
+                return 0
+            return max(0, math.ceil(delta.total_seconds() / 86400))
+        except Exception:
+            return 0
+
+    # Сначала пробуем кэш (те же данные, что видит пользователь в подписке)
+    try:
+        cache_key = f'live_data_{user.remnawave_uuid}'
+        cached = cache.get(cache_key)
+        if cached and isinstance(cached, dict):
+            d = days_from_expire(cached.get('expireAt'))
+            if d > 0:
+                return d
+    except Exception:
+        pass
+
     try:
         api_url = os.environ.get('API_URL', '')
         admin_token = os.environ.get('ADMIN_TOKEN', '')
-        
+        if not api_url or not admin_token:
+            return 0
+
         response = requests.get(
             f"{api_url}/api/users/{user.remnawave_uuid}",
             headers={"Authorization": f"Bearer {admin_token}"},
             timeout=10
         )
-        
+
         if response.status_code == 200:
             data = response.json().get('response', {})
-            expire_at = data.get('expireAt')
-            if expire_at:
-                expire_date = datetime.fromisoformat(expire_at.replace('Z', '+00:00'))
-                now = datetime.now(timezone.utc)
-                days = (expire_date - now).days
-                return max(0, days)
-    except:
+            return days_from_expire(data.get('expireAt'))
+    except Exception:
         pass
-    
+
     return 0
 
 
 def update_user_subscription(user, days_delta):
-    """Обновить подписку пользователя (добавить/убавить дни)"""
+    """Обновить подписку пользователя (добавить/убавить дни). days_delta может быть float (для x0.5)."""
     if not user or not user.remnawave_uuid:
         return False
-    
+
     try:
         api_url = os.environ.get('API_URL', '')
         admin_token = os.environ.get('ADMIN_TOKEN', '')
-        
-        # Получаем текущую дату окончания
+        if not api_url or not admin_token:
+            return False
+
+        # Получаем текущую дату окончания из API (всегда свежие данные)
         response = requests.get(
             f"{api_url}/api/users/{user.remnawave_uuid}",
             headers={"Authorization": f"Bearer {admin_token}"},
             timeout=10
         )
-        
+
         if response.status_code != 200:
             return False
-        
+
         data = response.json().get('response', {})
         current_expire = data.get('expireAt')
-        
+
         if current_expire:
-            expire_date = datetime.fromisoformat(current_expire.replace('Z', '+00:00'))
+            if isinstance(current_expire, str):
+                current_expire = current_expire.replace('Z', '+00:00')
+            expire_date = datetime.fromisoformat(current_expire) if isinstance(current_expire, str) else current_expire
         else:
             expire_date = datetime.now(timezone.utc)
-        
-        # Добавляем/убавляем дни
-        new_expire = expire_date + timedelta(days=days_delta)
-        
-        # Обновляем через API (правильный формат - uuid в теле запроса)
+
+        if hasattr(expire_date, 'tzinfo') and expire_date.tzinfo is None:
+            expire_date = expire_date.replace(tzinfo=timezone.utc)
+
+        # Добавляем/убавляем дни (поддержка дробных для x0.5)
+        days_delta_val = float(days_delta)
+        new_expire = expire_date + timedelta(days=days_delta_val)
+
         update_response = requests.patch(
             f"{api_url}/api/users",
             headers={
@@ -2985,11 +3095,17 @@ def update_user_subscription(user, days_delta):
             json={"uuid": user.remnawave_uuid, "expireAt": new_expire.isoformat()},
             timeout=10
         )
-        
+
         if update_response.status_code != 200:
             print(f"Error updating subscription: Status {update_response.status_code}, Response: {update_response.text[:200]}")
-        
-        return update_response.status_code == 200
+            return False
+
+        # Сбрасываем кэш, чтобы get_user_days_remaining и подписка в мини-аппе видели новый баланс
+        try:
+            cache.delete(f'live_data_{user.remnawave_uuid}')
+        except Exception:
+            pass
+        return True
     except Exception as e:
         print(f"Error updating subscription: {e}")
         return False
@@ -3042,7 +3158,7 @@ def casino_play():
     config = get_casino_config()
     
     if not config['enabled']:
-        response = jsonify({'error': 'Казино отключено'})
+        response = jsonify({'error': 'Фортуна отключена'})
         response.headers.add('Access-Control-Allow-Origin', '*')
         return response, 400
     
@@ -3085,58 +3201,45 @@ def casino_play():
             return response, 400
         
         # Проверяем баланс дней
-        days_remaining = get_user_days_remaining(user)
-        
-        if days_remaining < bet_days:
-            response = jsonify({'error': f'Недостаточно дней для ставки. У вас {days_remaining} дней'})
+        balance_before = get_user_days_remaining(user)
+        if balance_before < bet_days:
+            response = jsonify({'error': f'Недостаточно дней для ставки. У вас {balance_before} дней'})
             response.headers.add('Access-Control-Allow-Origin', '*')
             return response, 400
-        
-        # Сначала списываем ставку
-        balance_before = days_remaining
-        success = update_user_subscription(user, -bet_days)
+
+        # Крутим колесо (до списания, чтобы результат не зависел от порядка запросов)
+        multiplier = spin_wheel(config['chances'])
+
+        # Выигрыш: bet_days * multiplier дней (float для x0.5 — половина обратно)
+        if multiplier == 0:
+            win_days = 0.0
+        else:
+            win_days = float(bet_days) * multiplier
+
+        # Одно атомарное обновление: списание ставки и начисление выигрыша (нет гонки между двумя PATCH)
+        net_delta = -bet_days + win_days
+        success = update_user_subscription(user, net_delta)
         if not success:
-            response = jsonify({'error': 'Ошибка списания ставки'})
+            response = jsonify({'error': 'Ошибка обновления подписки (списание/начисление дней)'})
             response.headers.add('Access-Control-Allow-Origin', '*')
             return response, 500
-        
-        # Крутим колесо
-        multiplier = spin_wheel(config['chances'])
-        
-        # Рассчитываем выигрыш
-        # Множитель показывает, сколько дней получаем за ставку
-        # Например, x5 означает, что за 1 день ставки получаем 5 дней
-        # Ставка уже списана, поэтому просто добавляем выигрыш
-        if multiplier == 0:
-            win_days = 0  # Потеря ставки (получаем 0, ставка уже списана)
-        else:
-            # Получаем bet_days * multiplier дней
-            win_days = int(bet_days * multiplier)
-        
-        # Добавляем выигрыш (если есть)
-        if win_days > 0:
-            success = update_user_subscription(user, win_days)
-            if not success:
-                response = jsonify({'error': 'Ошибка начисления выигрыша'})
-                response.headers.add('Access-Control-Allow-Origin', '*')
-                return response, 500
-        
-        # Получаем финальный баланс
-        days_remaining_after = get_user_days_remaining(user)
-        balance_after = days_remaining_after
+
+        # Финальный баланс дней после обновления
+        balance_after = get_user_days_remaining(user)
         
         # Чистый выигрыш/проигрыш для статистики
         net_win_days = win_days - bet_days
         
-        # Логируем для отладки
-        print(f"Casino: bet={bet_days}, multiplier={multiplier}, win_days={win_days}, net_win={net_win_days}, balance_before={balance_before}, balance_after={balance_after}")
+        # Логируем для отладки (списание и выдача дней в одном PATCH: net_delta = -bet_days + win_days)
+        print(f"Casino: bet={bet_days}, multiplier={multiplier}, win_days={win_days}, net_delta={net_delta}, balance_before={balance_before}, balance_after={balance_after}")
         
-        # Сохраняем игру в историю
+        # Сохраняем игру в историю (в БД — целые числа)
+        net_win_int = int(round(net_win_days))
         game = CasinoGame(
             user_id=user.id,
             bet_days=bet_days,
             multiplier=multiplier,
-            win_days=net_win_days,  # Чистый выигрыш/проигрыш для статистики
+            win_days=net_win_int,
             balance_before=balance_before,
             balance_after=balance_after
         )
@@ -3168,9 +3271,9 @@ def casino_play():
         stats.total_bet_days += bet_days
         
         if net_win_days > 0:
-            stats.total_win_days += net_win_days
+            stats.total_win_days += max(0, int(round(net_win_days)))
         else:
-            stats.total_lost_days += abs(net_win_days)
+            stats.total_lost_days += max(0, int(round(abs(net_win_days))))
         
         stats.house_profit_days = stats.total_lost_days - stats.total_win_days
         

@@ -53,6 +53,7 @@ from modules.models.trial import TrialSettings
 from modules.models.user_config import UserConfig
 from modules.models.config_share import ConfigShareToken
 from modules.models.option import PurchaseOption
+from modules.models.email_setting import EmailSetting
 
 # ============================================================================
 # ИМПОРТ API МАРШРУТОВ
@@ -609,7 +610,7 @@ if __name__ == '__main__':
             # Не прерываем запуск приложения, продолжаем работу
         
         app.logger.info("=" * 60)
-        app.logger.info("StealthNET API Starting...")
+        app.logger.info("API Starting...")
         app.logger.info(f"Registered {len(list(app.url_map.iter_rules()))} endpoints")
         app.logger.info("=" * 60)
         

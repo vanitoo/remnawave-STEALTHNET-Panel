@@ -98,9 +98,11 @@ services:
     volumes:
       - ./.env:/app/.env
       - ./logo.png:/app/logo.png
+      - ./instance:/app/instance
       - ./logs:/app/logs
     environment:
       - FLASK_API_URL=http://api:5000
+      - INSTANCE_PATH=/app/instance
       - DB_HOST=postgres
       - DB_PORT=5432
       - REDIS_HOST=redis

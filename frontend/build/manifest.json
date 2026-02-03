@@ -1,6 +1,6 @@
 {
-  "short_name": "STEALTHNET",
-  "name": "STEALTHNET Client Panel",
+  "short_name": "Panel",
+  "name": "Client Panel",
   "icons": [
     {
       "src": "favicon.ico",

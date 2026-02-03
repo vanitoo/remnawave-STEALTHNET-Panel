@@ -49,6 +49,57 @@ logger = logging.getLogger(__name__)
 # Единый разделитель для сообщений (в одну строку)
 SEPARATOR_LINE = "-" * 32
 
+# Эмодзи из .env — только те, что в тексте сообщений (кнопки меняются с сайта).
+_DEFAULT_EMOJIS = {
+    "HEADER": "🛡", "MAIN_MENU": "👋", "BALANCE": "💰", "STATUS": "📊", "DATE": "📅",
+    "TIME": "⏰", "DEVICES": "📱", "TRAFFIC": "📈", "LINK": "🔗", "ACTIVE_GREEN": "🟢",
+    "ACTIVE_YELLOW": "🟡", "INACTIVE": "🔴", "TRIAL": "💡", "CONNECT": "🚀",
+    "TARIFFS": "💎", "PACKAGE": "📦", "CARD": "💳", "NOTE": "📝", "LOCATION": "📍",
+    "PUZZLE": "🧩", "STAR": "⭐", "SERVERS": "🌐", "CROWN": "👑", "DURATION": "⏱️",
+}
+
+
+def get_emoji(key: str) -> str:
+    """Возвращает эмодзи по ключу из .env (EMOJI_HEADER, EMOJI_TRIAL, ...) или дефолт."""
+    k = key.upper().replace("-", "_")
+    return (os.getenv(f"EMOJI_{k}", "") or _DEFAULT_EMOJIS.get(k, "")).strip() or _DEFAULT_EMOJIS.get(k, "")
+
+
+def get_tg_emoji_html(key: str) -> str:
+    """Для премиум: если задан EMOJI_*_TG_ID — возвращает <tg-emoji emoji-id=\"...\">fallback</tg-emoji>, иначе Unicode."""
+    emoji = get_emoji(key)
+    tg_id = (os.getenv(f"EMOJI_{key.upper().replace('-', '_')}_TG_ID") or "").strip()
+    if tg_id:
+        return f'<tg-emoji emoji-id="{tg_id}">{emoji}</tg-emoji>'
+    return emoji
+
+
+def welcome_text_to_html_with_tg_emoji(text: str, user_lang: str) -> str:
+    """Конвертирует приветствие в HTML и подставляет tg-emoji по emoji-id для всех эмодзи в тексте (премиум-пользователи).
+    Кнопки API не поддерживают tg-emoji — кастомные эмодзи только в теле сообщения."""
+    text_html = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    # Все эмодзи из текста заменяем на tg-emoji, если задан EMOJI_*_TG_ID
+    for key in _DEFAULT_EMOJIS:
+        text_html = text_html.replace(get_emoji(key), get_tg_emoji_html(key))
+    # Добавляем строку «Подключиться к VPN» под строкой триала (в тексте; кнопка — с сайта)
+    act_full = get_text('activate_trial_button', user_lang)
+    act_plain = act_full.lstrip(get_emoji("TRIAL") + " ").lstrip("🎁 ").strip() or act_full
+    new_line = f"{get_tg_emoji_html('TRIAL')} {act_plain}\n"
+    connect_plain = get_text('connect_button', user_lang).replace(get_emoji("CONNECT"), "", 1).strip()
+    connect_line = f"{get_tg_emoji_html('CONNECT')} {connect_plain}\n"
+    text_html = text_html.replace(new_line + "━━━━━━━━━━━━━━━\n", new_line + connect_line + "━━━━━━━━━━━━━━━\n")
+    return text_html
+
+
+def text_to_html_with_tg_emoji(text: str) -> str:
+    """Конвертирует любой текст в HTML и подставляет tg-emoji по emoji-id (для премиум-пользователей)."""
+    if not text:
+        return text
+    text_html = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    for key in _DEFAULT_EMOJIS:
+        text_html = text_html.replace(get_emoji(key), get_tg_emoji_html(key))
+    return text_html
+
 
 def normalize_ui_text(text: str) -> str:
     """Нормализует оформление текста сообщений (разделители в одну строку)."""
@@ -72,6 +123,67 @@ BOT_WEBHOOK_PORT = int(os.getenv("BOT_WEBHOOK_PORT", "8443"))
 
 # Путь к логотипу
 LOGO_PATH = os.path.join(os.path.dirname(__file__), "logo.png")
+
+
+_logo_path_logged = False
+
+def _get_logo_path(logo_page: str = None) -> str:
+    """Путь к логотипу для страницы бота. logo_page: default, main_menu, subscription_status, tariffs, и т.д."""
+    global _logo_path_logged
+    page = (logo_page or "default").strip() or "default"
+    root = os.path.dirname(os.path.abspath(__file__))
+    instance_base = os.environ.get("INSTANCE_PATH") or os.path.join(root, "instance")
+    logos_dir = os.path.join(instance_base, "uploads", "bot_logos")
+
+    def _try_in_dir(directory: str, name: str) -> str | None:
+        if not directory or not os.path.isdir(directory):
+            return None
+        for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+            p = os.path.join(directory, name + ext)
+            if os.path.isfile(p):
+                return p
+        return None
+
+    # Логируем один раз при первом вызове — чтобы понять, что видит бот
+    if not _logo_path_logged:
+        _logo_path_logged = True
+        main_png = os.path.join(logos_dir, "main_menu.png")
+        try:
+            ls = os.listdir(logos_dir) if os.path.isdir(logos_dir) else []
+        except Exception as e:
+            ls = f"<error: {e}>"
+        logger.warning(
+            "[logo] root=%s INSTANCE_PATH=%s logos_dir=%s exists=%s main_menu.png exists=%s list=%s",
+            root, os.environ.get("INSTANCE_PATH"), logos_dir,
+            os.path.isdir(logos_dir), os.path.isfile(main_png), ls
+        )
+
+    # Сначала по ключу страницы: subscription_menu → subscription_menu.png, main_menu → main_menu.png
+    # Для default — только default.png; если его нет, в конце вернём корневой logo.png
+    found = _try_in_dir(logos_dir, page) or _try_in_dir(logos_dir, "default")
+    if found:
+        return found
+    cwd_logos = os.path.join(os.getcwd(), "instance", "uploads", "bot_logos")
+    found = _try_in_dir(cwd_logos, page) or _try_in_dir(cwd_logos, "default")
+    if found:
+        return found
+
+    try:
+        config = get_bot_config()
+        logos = config.get("bot_page_logos") or {}
+        relative = logos.get(page) or logos.get("default")
+        if relative and isinstance(relative, str):
+            relative = relative.replace("\\", "/").lstrip("/")
+            if relative.startswith("instance/"):
+                path_via_instance = os.path.normpath(os.path.join(instance_base, relative[len("instance/"):]))
+                if os.path.isfile(path_via_instance):
+                    return path_via_instance
+            abs_path = os.path.normpath(os.path.join(root, relative))
+            if os.path.isfile(abs_path):
+                return abs_path
+    except Exception as e:
+        logger.warning(f"_get_logo_path({page}): {e}")
+    return LOGO_PATH
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ДИНАМИЧЕСКАЯ КОНФИГУРАЦИЯ БОТА (из админки)
@@ -335,6 +447,14 @@ def get_buttons_order() -> list:
     return default_order
 
 
+def _subscription_url_for_copy(url: str) -> str:
+    """Ссылка с нулевым пробелом в середине — в Telegram не открывается по тапу, только выделение/копирование."""
+    if not url or len(url) < 6:
+        return url
+    mid = len(url) // 2
+    return url[:mid] + '\u200b' + url[mid:]
+
+
 def build_main_menu_keyboard(user_lang: str, is_active: bool, subscription_url: str, expire_at, trial_used: bool = False) -> list:
     """
     Построить минималистичную клавиатуру главного меню с категориями.
@@ -386,35 +506,35 @@ def build_main_menu_keyboard(user_lang: str, is_active: bool, subscription_url: 
 
     def make_button(btn_id: str):
         if btn_id == "trial":
-            return InlineKeyboardButton(f"🎁 {trial_text}", callback_data="activate_trial")
+            return InlineKeyboardButton(trial_text, callback_data="activate_trial")
         if btn_id == "connect":
-            return InlineKeyboardButton(f"🚀 {get_text('connect_button', user_lang)}", url=subscription_url)
+            return InlineKeyboardButton(get_text('connect_button', user_lang), url=subscription_url)
         if btn_id == "status":
-            return InlineKeyboardButton(f"📊 {get_text('status_button', user_lang)}", callback_data="subscription_menu")
+            return InlineKeyboardButton(get_text('status_button', user_lang), callback_data="subscription_menu")
         if btn_id == "tariffs":
-            return InlineKeyboardButton(f"💎 {get_text('tariffs_button', user_lang)}", callback_data="tariffs")
+            return InlineKeyboardButton(get_text('tariffs_button', user_lang), callback_data="tariffs")
         if btn_id == "options":
-            return InlineKeyboardButton(f"📦 {get_text('options_button', user_lang)}", callback_data="options")
+            return InlineKeyboardButton(get_text('options_button', user_lang), callback_data="options")
         if btn_id == "referrals":
-            return InlineKeyboardButton(f"🎁 {get_text('referrals_button', user_lang)}", callback_data="referrals")
+            return InlineKeyboardButton(get_text('referrals_button', user_lang), callback_data="referrals")
         if btn_id == "support":
-            return InlineKeyboardButton(f"💬 {get_text('support_button', user_lang)}", callback_data="support_menu")
+            return InlineKeyboardButton(get_text('support_button', user_lang), callback_data="support_menu")
         if btn_id == "settings":
-            return InlineKeyboardButton(f"⚙️ {get_text('settings_button', user_lang)}", callback_data="settings")
+            return InlineKeyboardButton(get_text('settings_button', user_lang), callback_data="settings")
         if btn_id == "webapp":
-            return InlineKeyboardButton(f"📱 {get_text('cabinet_button', user_lang)}", web_app=WebAppInfo(url=MINIAPP_URL))
+            return InlineKeyboardButton(get_text('cabinet_button', user_lang), web_app=WebAppInfo(url=MINIAPP_URL))
 
         # backward-compatible
         if btn_id == "configs":
-            return InlineKeyboardButton(f"🧩 {get_text('configs_button', user_lang)}", callback_data="sub_configs")
+            return InlineKeyboardButton(get_text('configs_button', user_lang), callback_data="sub_configs")
         if btn_id == "servers":
-            return InlineKeyboardButton(f"🌐 {get_text('servers_button', user_lang)}", callback_data="sub_servers")
+            return InlineKeyboardButton(get_text('servers_button', user_lang), callback_data="sub_servers")
         if btn_id == "topup":
-            return InlineKeyboardButton(f"💰 {get_text('top_up_balance', user_lang)}", callback_data="sub_topup")
+            return InlineKeyboardButton(get_text('top_up_balance', user_lang), callback_data="sub_topup")
         if btn_id == "agreement":
-            return InlineKeyboardButton(f"📄 {get_text('user_agreement_button', user_lang)}", callback_data="support_agreement")
+            return InlineKeyboardButton(get_text('user_agreement_button', user_lang), callback_data="support_agreement")
         if btn_id == "offer":
-            return InlineKeyboardButton(f"📋 {get_text('offer_button', user_lang)}", callback_data="support_offer")
+            return InlineKeyboardButton(get_text('offer_button', user_lang), callback_data="support_offer")
 
         return None
 
@@ -521,12 +641,12 @@ def format_info_line(label: str, value: str, icon: str = "") -> str:
     return f"{label}: {value}\n"
 
 
-async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mode=None, context: ContextTypes.DEFAULT_TYPE = None):
+async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mode=None, context: ContextTypes.DEFAULT_TYPE = None, logo_page: str = None):
     """
     Отправляет сообщение с логотипом сверху.
-    Всегда отправляет логотип с текстом в одном сообщении (фото с caption).
-    Если текст длиннее 1024 символов, обрезает его.
+    logo_page: ключ страницы (default, main_menu, subscription_status, tariffs, ...) — из админки «Логотипы страниц бота».
     """
+    logo_path = _get_logo_path(logo_page)
     try:
         def _is_parse_entities_error(err: Exception) -> bool:
             s = str(err).lower()
@@ -544,8 +664,8 @@ async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mo
             context = getattr(update, '_context', None)
         
         # Проверяем существование файла логотипа
-        if not os.path.exists(LOGO_PATH):
-            logger.warning(f"Логотип не найден: {LOGO_PATH}, отправляем без логотипа")
+        if not os.path.exists(logo_path):
+            logger.warning(f"Логотип не найден: {logo_path}, отправляем без логотипа")
             sent_message = None
             if update.message:
                 sent_message = await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
@@ -568,7 +688,7 @@ async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mo
             return
         
         # Всегда отправляем фото с caption в одном сообщении
-        with open(LOGO_PATH, 'rb') as logo_file:
+        with open(logo_path, 'rb') as logo_file:
             sent_message = await message.reply_photo(
                 photo=logo_file,
                 caption=text,
@@ -591,10 +711,10 @@ async def reply_with_logo(update: Update, text: str, reply_markup=None, parse_mo
             try:
                 fallback_text = clean_markdown_for_cards(text)
                 # 1) пробуем снова фото, но без parse_mode
-                if os.path.exists(LOGO_PATH):
+                if os.path.exists(logo_path):
                     message = update.message if update.message else (update.callback_query.message if update.callback_query else None)
                     if message:
-                        with open(LOGO_PATH, 'rb') as logo_file:
+                        with open(logo_path, 'rb') as logo_file:
                             sent_message = await message.reply_photo(
                                 photo=logo_file,
                                 caption=fallback_text,
@@ -669,22 +789,27 @@ def get_days_text(days: int, lang: str) -> str:
         return f"{days} {get_text('days', lang)}"
 
 
-async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None, parse_mode=None):
+async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None, parse_mode=None, logo_page: str = None):
     """
     Безопасно редактирует сообщение или отправляет новое с логотипом.
-    Если сообщение содержит фото (логотип), редактирует caption.
-    Старые сообщения "растворяются" - на их месте появляется новый контент.
+    logo_page: ключ страницы (default, main_menu, subscription_status, tariffs, ...).
     """
+    logo_path = _get_logo_path(logo_page)
     query = update.callback_query
     text = normalize_ui_text(text)
+    try:
+        text = text_to_html_with_tg_emoji(text)
+        parse_mode = "HTML"
+    except Exception as e:
+        logger.debug(f"text_to_html_with_tg_emoji: {e}")
     if not query:
         # Если нет callback_query, просто отправляем новое сообщение
-        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode=parse_mode, context=context)
+        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode=parse_mode, context=context, logo_page=logo_page)
         return
     
     message = query.message
     if not message:
-        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode=parse_mode, context=context)
+        await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode=parse_mode, context=context, logo_page=logo_page)
         return
     
     # Обрезаем текст до 1024 символов для caption
@@ -694,43 +819,40 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
     has_photo = message.photo is not None and len(message.photo) > 0
     has_text = message.text is not None
     
-    # Если у нас есть логотип и текущее сообщение тоже с фото
-    if has_photo and os.path.exists(LOGO_PATH):
-        # Проверяем, является ли текущее фото логотипом
-        # Если caption содержит определенные ключевые слова, это может быть изображение тарифа
-        current_caption = message.caption or ""
-        
-        # Определяем, является ли это изображением тарифа
-        # Логотип обычно имеет caption с "Тарифные планы" или другими длинными текстами меню
-        # Изображение тарифа обычно имеет короткий caption "Выберите длительность:"
-        # Если caption не содержит признаков логотипа, считаем это изображением тарифа
-        is_logo = "Тарифные планы" in current_caption or len(current_caption) > 30
-        is_tariff_image = not is_logo and (
-            "Выберите длительность" in current_caption or
-            len(current_caption) < 25
-        )
-        
-        # Если это изображение тарифа, всегда удаляем и отправляем новое с логотипом
-        # Это гарантирует замену изображения тарифа на логотип при возврате назад
-        if is_tariff_image:
-            # Это изображение тарифа или неизвестное фото - удаляем и отправляем новое с логотипом
-            logger.debug(f"Detected tariff image or unknown photo, replacing with logo")
+    # Если у нас есть логотип и текущее сообщение с фото — всегда удаляем и отправляем новое с нужным логотипом,
+    # чтобы при переходе между экранами (main_menu → subscription_menu и т.д.) показывался правильный логотип страницы
+    if has_photo and os.path.exists(logo_path):
+        try:
+            await message.delete()
+        except Exception as del_err:
+            logger.debug(f"Could not delete old photo message: {del_err}")
+        try:
+            with open(logo_path, 'rb') as logo_file:
+                sent_message = await context.bot.send_photo(
+                    chat_id=message.chat.id,
+                    photo=logo_file,
+                    caption=display_text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+                if sent_message and sent_message.message_id:
+                    user_data = context.user_data if hasattr(context, 'user_data') else {}
+                    if 'bot_message_ids' not in user_data:
+                        user_data['bot_message_ids'] = []
+                    user_data['bot_message_ids'].append(sent_message.message_id)
+                    if len(user_data['bot_message_ids']) > 20:
+                        user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+                return sent_message
+        except Exception as e2:
+            logger.warning(f"Error sending photo with logo: {e2}")
             try:
-                await message.delete()
-            except Exception as del_err:
-                logger.debug(f"Could not delete old photo message: {del_err}")
-            
-            # Отправляем новое сообщение с логотипом
-            try:
-                with open(LOGO_PATH, 'rb') as logo_file:
+                with open(logo_path, 'rb') as logo_file:
                     sent_message = await context.bot.send_photo(
                         chat_id=message.chat.id,
                         photo=logo_file,
-                        caption=display_text,
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode
+                        caption=clean_markdown_for_cards(display_text),
+                        reply_markup=reply_markup
                     )
-                    # Сохраняем message_id
                     if sent_message and sent_message.message_id:
                         user_data = context.user_data if hasattr(context, 'user_data') else {}
                         if 'bot_message_ids' not in user_data:
@@ -738,129 +860,28 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
                         user_data['bot_message_ids'].append(sent_message.message_id)
                         if len(user_data['bot_message_ids']) > 20:
                             user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
-                    return sent_message
-            except Exception as e2:
-                logger.warning(f"Error sending photo with logo: {e2}")
-                # Fallback: отправляем без форматирования
-                try:
-                    with open(LOGO_PATH, 'rb') as logo_file:
-                        sent_message = await context.bot.send_photo(
-                            chat_id=message.chat.id,
-                            photo=logo_file,
-                            caption=clean_markdown_for_cards(display_text),
-                            reply_markup=reply_markup
-                        )
-                        # Сохраняем message_id
-                        if sent_message and sent_message.message_id:
-                            user_data = context.user_data if hasattr(context, 'user_data') else {}
-                            if 'bot_message_ids' not in user_data:
-                                user_data['bot_message_ids'] = []
-                            user_data['bot_message_ids'].append(sent_message.message_id)
-                            if len(user_data['bot_message_ids']) > 20:
-                                user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
                         return sent_message
-                except Exception as e3:
-                    logger.error(f"Failed to send photo: {e3}")
-        else:
-            # Похоже на логотип - пытаемся отредактировать caption
-            try:
-                await query.edit_message_caption(
-                    caption=display_text,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode
-                )
-                # Сохраняем message_id отредактированного сообщения
-                if query.message and query.message.message_id:
-                    user_data = context.user_data if hasattr(context, 'user_data') else {}
-                    if 'bot_message_ids' not in user_data:
-                        user_data['bot_message_ids'] = []
-                    if query.message.message_id not in user_data['bot_message_ids']:
-                        user_data['bot_message_ids'].append(query.message.message_id)
-                        if len(user_data['bot_message_ids']) > 20:
-                            user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
-                return
-            except Exception as e:
-                error_str = str(e).lower()
-                # Если ошибка парсинга Markdown, пробуем без форматирования
-                if "markdown" in error_str or "parse" in error_str or "can't parse" in error_str:
-                    try:
-                        await query.edit_message_caption(
-                            caption=clean_markdown_for_cards(display_text),
-                            reply_markup=reply_markup
-                        )
-                        return
-                    except Exception as e2:
-                        logger.debug(f"Failed to edit caption without formatting: {e2}")
-                # Если сообщение не изменилось (тот же текст)
-                elif "message is not modified" in error_str:
-                    return  # Просто игнорируем, всё ок
-                # Если не удалось отредактировать, удаляем и отправляем новое
-                logger.debug(f"Could not edit photo caption, deleting and sending new with logo: {e}")
-                try:
-                    await message.delete()
-                except Exception as del_err:
-                    logger.debug(f"Could not delete old photo message: {del_err}")
-                
-                # Отправляем новое сообщение с логотипом
-                try:
-                    with open(LOGO_PATH, 'rb') as logo_file:
-                        sent_message = await context.bot.send_photo(
-                            chat_id=message.chat.id,
-                            photo=logo_file,
-                            caption=display_text,
-                            reply_markup=reply_markup,
-                            parse_mode=parse_mode
-                        )
-                        # Сохраняем message_id
-                        if sent_message and sent_message.message_id:
-                            user_data = context.user_data if hasattr(context, 'user_data') else {}
-                            if 'bot_message_ids' not in user_data:
-                                user_data['bot_message_ids'] = []
-                            user_data['bot_message_ids'].append(sent_message.message_id)
-                            if len(user_data['bot_message_ids']) > 20:
-                                user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
-                        return sent_message
-                except Exception as e2:
-                    logger.warning(f"Error sending photo with logo: {e2}")
-                    # Fallback: отправляем без форматирования
-                    try:
-                        with open(LOGO_PATH, 'rb') as logo_file:
-                            sent_message = await context.bot.send_photo(
-                                chat_id=message.chat.id,
-                                photo=logo_file,
-                                caption=clean_markdown_for_cards(display_text),
-                                reply_markup=reply_markup
-                            )
-                            # Сохраняем message_id
-                            if sent_message and sent_message.message_id:
-                                user_data = context.user_data if hasattr(context, 'user_data') else {}
-                                if 'bot_message_ids' not in user_data:
-                                    user_data['bot_message_ids'] = []
-                                user_data['bot_message_ids'].append(sent_message.message_id)
-                                if len(user_data['bot_message_ids']) > 20:
-                                    user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
-                            return sent_message
-                    except Exception as e3:
-                        logger.error(f"Failed to send photo: {e3}")
+            except Exception as e3:
+                logger.error(f"Failed to send photo: {e3}")
     
     # Если нет логотипа, пробуем отредактировать caption (если это фото)
     elif has_photo:
         try:
-                await query.edit_message_caption(
-                    caption=display_text,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode
-                )
-                # Сохраняем message_id отредактированного сообщения
-                if query.message and query.message.message_id:
-                    user_data = context.user_data if hasattr(context, 'user_data') else {}
-                    if 'bot_message_ids' not in user_data:
-                        user_data['bot_message_ids'] = []
-                    if query.message.message_id not in user_data['bot_message_ids']:
-                        user_data['bot_message_ids'].append(query.message.message_id)
-                        if len(user_data['bot_message_ids']) > 20:
-                            user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
-                return
+            await query.edit_message_caption(
+                caption=display_text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+            # Сохраняем message_id отредактированного сообщения
+            if query.message and query.message.message_id:
+                user_data = context.user_data if hasattr(context, 'user_data') else {}
+                if 'bot_message_ids' not in user_data:
+                    user_data['bot_message_ids'] = []
+                if query.message.message_id not in user_data['bot_message_ids']:
+                    user_data['bot_message_ids'].append(query.message.message_id)
+                    if len(user_data['bot_message_ids']) > 20:
+                        user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+            return
         except Exception as e:
             error_str = str(e).lower()
             # Если ошибка парсинга Markdown, пробуем без форматирования
@@ -883,7 +904,7 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
     # Но если у нас есть логотип и мы хотим его показать, лучше удалить старое и отправить новое
     if has_text:
         # Если есть логотип, удаляем старое текстовое сообщение и отправляем новое с логотипом
-        if os.path.exists(LOGO_PATH):
+        if os.path.exists(logo_path):
             try:
                 await message.delete()
             except Exception as e:
@@ -891,7 +912,7 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
             
             # Отправляем новое сообщение с логотипом
             try:
-                with open(LOGO_PATH, 'rb') as logo_file:
+                with open(logo_path, 'rb') as logo_file:
                     sent_message = await context.bot.send_photo(
                         chat_id=message.chat.id,
                         photo=logo_file,
@@ -899,7 +920,6 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
                         reply_markup=reply_markup,
                         parse_mode=parse_mode
                     )
-                    # Сохраняем message_id
                     if sent_message and sent_message.message_id:
                         user_data = context.user_data if hasattr(context, 'user_data') else {}
                         if 'bot_message_ids' not in user_data:
@@ -910,16 +930,14 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
                     return sent_message
             except Exception as e2:
                 logger.warning(f"Error sending photo with logo: {e2}")
-                # Fallback: отправляем без форматирования
                 try:
-                    with open(LOGO_PATH, 'rb') as logo_file:
+                    with open(logo_path, 'rb') as logo_file:
                         sent_message = await context.bot.send_photo(
                             chat_id=message.chat.id,
                             photo=logo_file,
                             caption=clean_markdown_for_cards(display_text),
                             reply_markup=reply_markup
                         )
-                        # Сохраняем message_id
                         if sent_message and sent_message.message_id:
                             user_data = context.user_data if hasattr(context, 'user_data') else {}
                             if 'bot_message_ids' not in user_data:
@@ -927,7 +945,7 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
                             user_data['bot_message_ids'].append(sent_message.message_id)
                             if len(user_data['bot_message_ids']) > 20:
                                 user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
-                        return sent_message
+                            return sent_message
                 except Exception as e3:
                     logger.error(f"Failed to send photo: {e3}")
         
@@ -974,8 +992,8 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
     
     # Отправляем новое сообщение с логотипом
     try:
-        if os.path.exists(LOGO_PATH):
-            with open(LOGO_PATH, 'rb') as logo_file:
+        if os.path.exists(logo_path):
+            with open(logo_path, 'rb') as logo_file:
                 await context.bot.send_photo(
                     chat_id=message.chat.id,
                     photo=logo_file,
@@ -984,27 +1002,25 @@ async def safe_edit_or_send_with_logo(update: Update, context: ContextTypes.DEFA
                     parse_mode=parse_mode
                 )
         else:
-                sent_message = await context.bot.send_message(
-                    chat_id=message.chat.id,
-                    text=display_text,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode
-                )
-                # Сохраняем message_id
-                if sent_message and sent_message.message_id:
-                    user_data = context.user_data if hasattr(context, 'user_data') else {}
-                    if 'bot_message_ids' not in user_data:
-                        user_data['bot_message_ids'] = []
-                    user_data['bot_message_ids'].append(sent_message.message_id)
-                    if len(user_data['bot_message_ids']) > 20:
-                        user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
+            sent_message = await context.bot.send_message(
+                chat_id=message.chat.id,
+                text=display_text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+            if sent_message and sent_message.message_id:
+                user_data = context.user_data if hasattr(context, 'user_data') else {}
+                if 'bot_message_ids' not in user_data:
+                    user_data['bot_message_ids'] = []
+                user_data['bot_message_ids'].append(sent_message.message_id)
+                if len(user_data['bot_message_ids']) > 20:
+                    user_data['bot_message_ids'] = user_data['bot_message_ids'][-20:]
                 return sent_message
     except Exception as e2:
-        # Если ошибка с Markdown, отправляем без форматирования
         logger.warning(f"Error sending message with logo: {e2}")
         try:
-            if os.path.exists(LOGO_PATH):
-                with open(LOGO_PATH, 'rb') as logo_file:
+            if os.path.exists(logo_path):
+                with open(logo_path, 'rb') as logo_file:
                     await context.bot.send_photo(
                         chat_id=message.chat.id,
                         photo=logo_file,
@@ -1584,7 +1600,7 @@ TRANSLATIONS = {
         'support': 'Поддержка',
         'settings': '⚙️ Настройки',
         'currency': 'Валюта',
-        'language': 'Язык',
+        'language': '🌐 Язык',
         'select_currency': 'Выберите валюту:',
         'select_language': 'Выберите язык:',
         'settings_saved': '✅ Настройки сохранены',
@@ -1611,7 +1627,7 @@ TRANSLATIONS = {
         'go_to_payment': 'Перейти к оплате',
         'pay_with_balance': 'Оплатить с баланса',
         'insufficient_balance': 'Недостаточно средств',
-        'top_up_balance': 'Пополнить баланс',
+        'top_up_balance': '💰 Пополнить баланс',
         'enter_amount': 'Введите сумму пополнения',
         'invalid_amount': 'Неверная сумма',
         'select_topup_method': 'Выберите способ пополнения',
@@ -1619,11 +1635,11 @@ TRANSLATIONS = {
         'balance': 'Баланс',
         'amount': 'Сумма',
         'select_amount_hint': 'Выберите сумму или введите свою',
-        'enter_custom_amount': 'Ввести свою сумму',
+        'enter_custom_amount': '✏️ Ввести свою сумму',
         'send_amount': 'Отправьте сумму пополнения числом',
         'invalid_amount_format': 'Неверный формат суммы. Введите число (например: 1500)',
         'amount_too_small': 'Минимальная сумма пополнения: 1',
-        'go_to_payment_button': 'Перейти к оплате',
+        'go_to_payment_button': '💳 Перейти к оплате',
         'go_to_payment_text': 'Перейдите по ссылке для оплаты',
         'after_payment': 'После оплаты баланс будет автоматически пополнен',
         'payment_successful': 'Платеж успешно обработан',
@@ -1673,24 +1689,25 @@ TRANSLATIONS = {
         'password_set': 'Установлен (недоступен)',
         'password_not_set': 'Пароль не установлен',
         'data_not_found': 'Данные не найдены',
-        'connect_button': 'Подключиться к VPN',
-        'activate_trial_button': 'Активировать триал',
-        'select_tariff_button': 'Выбрать тариф',
+        'connect_button': '🚀 Подключиться к VPN',
+        'activate_trial_button': '💡 Активировать триал',
+        'select_tariff_button': '💎 Выбрать тариф',
         'main_menu_button': 'Главное меню',
-        'status_button': 'Моя подписка',
-        'tariffs_button': 'Тарифы',
-        'options_button': 'Опции',
-        'configs_button': 'Подписки',
-        'servers_button': 'Серверы',
-        'referrals_button': 'Рефералка',
-        'support_button': 'Поддержка',
-        'support_bot_button': 'Бот Поддержки',
-        'administration_button': 'Администрация',
-        'settings_button': 'Настройки',
-        'cabinet_button': 'Web Кабинет',
+        'status_button': '📊 Моя подписка',
+        'tariffs_button': '💎 Тарифы',
+        'options_button': '📦 Опции',
+        'configs_button': '🧩 Подписки',
+        'servers_button': '🌐 Серверы',
+        'referrals_button': '🎁 Рефералка',
+        'support_button': '💬 Поддержка',
+        'contact_support_button': '💬 Связаться с поддержкой',
+        'support_bot_button': '🤖 Бот Поддержки',
+        'administration_button': '👮 Администрация',
+        'settings_button': '⚙️ Настройки',
+        'cabinet_button': '📱 Web Кабинет',
         'documents_button': 'Документы',
-        'user_agreement_button': 'Соглашение',
-        'offer_button': 'Оферта',
+        'user_agreement_button': '📄 Соглашение',
+        'offer_button': '📋 Оферта',
         'refund_policy_button': 'Политика возврата',
         'user_agreement_title': '📄 Пользовательское соглашение',
         'offer_title': '📋 Публичная оферта',
@@ -1712,7 +1729,7 @@ TRANSLATIONS = {
         'available_options': 'Доступно вариантов',
         'select_duration': 'Выберите длительность подписки',
         'per_day': 'день',
-        'back_to_type': 'К выбору типа',
+        'back_to_type': '🔙 К выбору типа',
         'servers_title': 'Серверы',
         'available_servers': 'Доступные серверы',
         'total_servers': 'Всего серверов',
@@ -1740,11 +1757,11 @@ TRANSLATIONS = {
         'duration_label': 'Длительность',
         'payment_methods': 'Выберите способ оплаты',
         'no_payment_methods': 'Нет доступных способов оплаты. Обратитесь в поддержку.',
-        'back_to_tariffs': 'Назад к тарифам',
+        'back_to_tariffs': '🔙 Назад к тарифам',
         'payment_created_title': 'Платеж создан',
         'go_to_payment_text': 'Перейдите по ссылке для оплаты:',
         'after_payment': 'После успешной оплаты подписка будет активирована автоматически.',
-        'go_to_payment_button': 'Перейти к оплате',
+        'go_to_payment_button': '💳 Перейти к оплате',
         'trial_activated_title': 'Триал активирован!',
         'trial_days_received': 'Вы получили 3 дня премиум доступа.',
         'enjoy_vpn': 'Наслаждайтесь VPN без ограничений!',
@@ -1758,13 +1775,19 @@ TRANSLATIONS = {
         'registration_error': 'Ошибка регистрации',
         'registration_failed': 'Не удалось зарегистрироваться. Попробуйте позже или зарегистрируйтесь на сайте:',
         'ticket_view_title': 'Тикет',
+        'try_again_button': '🔙 Попробовать снова',
+        'copy_token_button': '📋 Скопировать токен',
+        'my_configs_button': '🧩 Мои подписки',
+        'new_subscription_button': '➕ Новая подписка',
+        'extend_button': '💎 Продлить',
+        'share_button': '📤 Поделиться',
         'status_label': 'Статус',
         'subject_label': 'Тема',
         'messages_label': 'Сообщения',
         'you': 'Вы',
         'support_label': 'Поддержка',
-        'reply_button': 'Ответить',
-        'back_to_support': 'К поддержке',
+        'reply_button': '💬 Ответить',
+        'back_to_support': '🔙 К поддержке',
         'creating_ticket': 'Создание тикета',
         'send_subject': 'Отправьте тему тикета в следующем сообщении:',
         'subject_saved': 'Тема сохранена. Теперь отправьте текст сообщения:',
@@ -1809,7 +1832,7 @@ TRANSLATIONS = {
         'support': 'Підтримка',
         'settings': '⚙️ Налаштування',
         'currency': 'Валюта',
-        'language': 'Мова',
+        'language': '🌐 Мова',
         'select_currency': 'Виберіть валюту:',
         'select_language': 'Виберіть мову:',
         'settings_saved': '✅ Налаштування збережено',
@@ -1836,7 +1859,7 @@ TRANSLATIONS = {
         'go_to_payment': 'Перейти до оплати',
         'pay_with_balance': 'Оплатити з балансу',
         'insufficient_balance': 'Недостатньо коштів',
-        'top_up_balance': 'Поповнити баланс',
+        'top_up_balance': '💰 Поповнити баланс',
         'enter_amount': 'Введіть суму поповнення',
         'invalid_amount': 'Невірна сума',
         'select_topup_method': 'Виберіть спосіб поповнення',
@@ -1844,11 +1867,11 @@ TRANSLATIONS = {
         'balance': 'Баланс',
         'amount': 'Сума',
         'select_amount_hint': 'Виберіть суму або введіть свою',
-        'enter_custom_amount': 'Ввести свою суму',
+        'enter_custom_amount': '✏️ Ввести свою суму',
         'send_amount': 'Відправте суму поповнення числом',
         'invalid_amount_format': 'Невірний формат суми. Введіть число (наприклад: 1500)',
         'amount_too_small': 'Мінімальна сума поповнення: 1',
-        'go_to_payment_button': 'Перейти до оплати',
+        'go_to_payment_button': '💳 Перейти до оплати',
         'go_to_payment_text': 'Перейдіть за посиланням для оплати',
         'after_payment': 'Після оплати баланс буде автоматично поповнено',
         'payment_successful': 'Платіж успішно оброблено',
@@ -1898,24 +1921,25 @@ TRANSLATIONS = {
         'password_set': 'Встановлено (недоступно)',
         'password_not_set': 'Пароль не встановлено',
         'data_not_found': 'Дані не знайдено',
-        'connect_button': 'Підключитися до VPN',
-        'activate_trial_button': 'Активувати триал',
-        'select_tariff_button': 'Вибрати тариф',
+        'connect_button': '🚀 Підключитися до VPN',
+        'activate_trial_button': '💡 Активувати тріал',
+        'select_tariff_button': '💎 Вибрати тариф',
         'main_menu_button': 'Головне меню',
-        'status_button': 'Моя підписка',
-        'tariffs_button': 'Тарифи',
-        'options_button': 'Опції',
-        'configs_button': 'Підписки',
-        'servers_button': 'Сервери',
-        'referrals_button': 'Рефералка',
-        'support_button': 'Підтримка',
-        'support_bot_button': 'Бот Підтримки',
-        'administration_button': 'Адміністрація',
-        'settings_button': 'Налаштування',
-        'cabinet_button': 'Web Кабінет',
+        'status_button': '📊 Моя підписка',
+        'tariffs_button': '💎 Тарифи',
+        'options_button': '📦 Опції',
+        'configs_button': '🧩 Підписки',
+        'servers_button': '🌐 Сервери',
+        'referrals_button': '🎁 Рефералка',
+        'support_button': '💬 Підтримка',
+        'contact_support_button': '💬 Зв\'язатися з підтримкою',
+        'support_bot_button': '🤖 Бот Підтримки',
+        'administration_button': '👮 Адміністрація',
+        'settings_button': '⚙️ Налаштування',
+        'cabinet_button': '📱 Web Кабінет',
         'documents_button': 'Документи',
-        'user_agreement_button': 'Угода',
-        'offer_button': 'Оферта',
+        'user_agreement_button': '📄 Угода',
+        'offer_button': '📋 Оферта',
         'refund_policy_button': 'Політика повернення',
         'user_agreement_title': '📄 Користувацька угода',
         'offer_title': '📋 Публічна оферта',
@@ -1936,7 +1960,7 @@ TRANSLATIONS = {
         'available_options': 'Доступно варіантів',
         'select_duration': 'Виберіть тривалість підписки',
         'per_day': 'день',
-        'back_to_type': 'До вибору типу',
+        'back_to_type': '🔙 До вибору типу',
         'servers_title': 'Сервери',
         'available_servers': 'Доступні сервери',
         'total_servers': 'Всього серверів',
@@ -1964,11 +1988,11 @@ TRANSLATIONS = {
         'duration_label': 'Тривалість',
         'payment_methods': 'Виберіть спосіб оплати',
         'no_payment_methods': 'Немає доступних способів оплати. Зверніться в підтримку.',
-        'back_to_tariffs': 'Назад до тарифів',
+        'back_to_tariffs': '🔙 Назад до тарифів',
         'payment_created_title': 'Платіж створено',
         'go_to_payment_text': 'Перейдіть за посиланням для оплати:',
         'after_payment': 'Після успішної оплати підписка буде активована автоматично.',
-        'go_to_payment_button': 'Перейти до оплати',
+        'go_to_payment_button': '💳 Перейти до оплати',
         'trial_activated_title': 'Триал активовано!',
         'trial_days_received': 'Ви отримали 3 дні преміум доступу.',
         'enjoy_vpn': 'Насолоджуйтесь VPN без обмежень!',
@@ -1982,13 +2006,19 @@ TRANSLATIONS = {
         'registration_error': 'Помилка реєстрації',
         'registration_failed': 'Не вдалося зареєструватися. Спробуйте пізніше або зареєструйтеся на сайті:',
         'ticket_view_title': 'Тікет',
+        'try_again_button': '🔙 Спробувати знову',
+        'copy_token_button': '📋 Скопіювати токен',
+        'my_configs_button': '🧩 Мої підписки',
+        'new_subscription_button': '➕ Нова підписка',
+        'extend_button': '💎 Продовжити',
+        'share_button': '📤 Поділитися',
         'status_label': 'Статус',
         'subject_label': 'Тема',
         'messages_label': 'Повідомлення',
         'you': 'Ви',
         'support_label': 'Підтримка',
-        'reply_button': 'Відповісти',
-        'back_to_support': 'До підтримки',
+        'reply_button': '💬 Відповісти',
+        'back_to_support': '🔙 До підтримки',
         'creating_ticket': 'Створення тікета',
         'send_subject': 'Відправте тему тікета в наступному повідомленні:',
         'subject_saved': 'Тема збережена. Тепер відправте текст повідомлення:',
@@ -2033,7 +2063,7 @@ TRANSLATIONS = {
         'support': 'Support',
         'settings': '⚙️ Settings',
         'currency': 'Currency',
-        'language': 'Language',
+        'language': '🌐 Language',
         'select_currency': 'Select currency:',
         'select_language': 'Select language:',
         'settings_saved': '✅ Settings saved',
@@ -2068,11 +2098,11 @@ TRANSLATIONS = {
         'balance': 'Balance',
         'amount': 'Amount',
         'select_amount_hint': 'Select amount or enter your own',
-        'enter_custom_amount': 'Enter custom amount',
+        'enter_custom_amount': '✏️ Enter custom amount',
         'send_amount': 'Send the top-up amount as a number',
         'invalid_amount_format': 'Invalid amount format. Enter a number (e.g., 1500)',
         'amount_too_small': 'Minimum top-up amount: 1',
-        'go_to_payment_button': 'Go to Payment',
+        'go_to_payment_button': '💳 Go to Payment',
         'go_to_payment_text': 'Go to the link to pay',
         'after_payment': 'After payment, the balance will be automatically topped up',
         'payment_successful': 'Payment successfully processed',
@@ -2122,24 +2152,25 @@ TRANSLATIONS = {
         'password_set': 'Set (unavailable)',
         'password_not_set': 'Password not set',
         'data_not_found': 'Data not found',
-        'connect_button': 'Connect',
-        'activate_trial_button': 'Activate Trial',
-        'select_tariff_button': 'Select Tariff',
+        'connect_button': '🚀 Connect to VPN',
+        'activate_trial_button': '💡 Activate Trial',
+        'select_tariff_button': '💎 Select Tariff',
         'main_menu_button': 'Main Menu',
-        'status_button': 'My Subscription',
-        'tariffs_button': 'Tariffs',
-        'options_button': 'Options',
-        'configs_button': 'Configs',
-        'servers_button': 'Servers',
-        'referrals_button': 'Referrals',
-        'support_button': 'Support',
-        'support_bot_button': 'Support Bot',
-        'administration_button': 'Administration',
-        'settings_button': 'Settings',
-        'cabinet_button': 'Web Cabinet',
+        'status_button': '📊 My Subscription',
+        'tariffs_button': '💎 Tariffs',
+        'options_button': '📦 Options',
+        'configs_button': '🧩 Configs',
+        'servers_button': '🌐 Servers',
+        'referrals_button': '🎁 Referrals',
+        'support_button': '💬 Support',
+        'contact_support_button': '💬 Contact Support',
+        'support_bot_button': '🤖 Support Bot',
+        'administration_button': '👮 Administration',
+        'settings_button': '⚙️ Settings',
+        'cabinet_button': '📱 Web Cabinet',
         'documents_button': 'Documents',
-        'user_agreement_button': 'Agreement',
-        'offer_button': 'Offer',
+        'user_agreement_button': '📄 Agreement',
+        'offer_button': '📋 Offer',
         'refund_policy_button': 'Refund Policy',
         'user_agreement_title': '📄 User Agreement',
         'offer_title': '📋 Public Offer',
@@ -2160,7 +2191,7 @@ TRANSLATIONS = {
         'available_options': 'Available options',
         'select_duration': 'Select subscription duration',
         'per_day': 'day',
-        'back_to_type': 'Back to Type Selection',
+        'back_to_type': '🔙 Back to Type Selection',
         'servers_title': 'Servers',
         'available_servers': 'Available Servers',
         'total_servers': 'Total Servers',
@@ -2188,11 +2219,11 @@ TRANSLATIONS = {
         'duration_label': 'Duration',
         'payment_methods': 'Select Payment Method',
         'no_payment_methods': 'No payment methods available. Contact support.',
-        'back_to_tariffs': 'Back to Tariffs',
+        'back_to_tariffs': '🔙 Back to Tariffs',
         'payment_created_title': 'Payment Created',
         'go_to_payment_text': 'Go to the link to pay:',
         'after_payment': 'After successful payment, the subscription will be activated automatically.',
-        'go_to_payment_button': 'Go to Payment',
+        'go_to_payment_button': '💳 Go to Payment',
         'trial_activated_title': 'Trial Activated!',
         'trial_days_received': 'You received 3 days of premium access.',
         'enjoy_vpn': 'Enjoy VPN without restrictions!',
@@ -2206,13 +2237,19 @@ TRANSLATIONS = {
         'registration_error': 'Registration Error',
         'registration_failed': 'Failed to register. Try again later or register on the website:',
         'ticket_view_title': 'Ticket',
+        'try_again_button': '🔙 Try Again',
+        'copy_token_button': '📋 Copy Token',
+        'my_configs_button': '🧩 My Subscriptions',
+        'new_subscription_button': '➕ New Subscription',
+        'extend_button': '💎 Extend',
+        'share_button': '📤 Share',
         'status_label': 'Status',
         'subject_label': 'Subject',
         'messages_label': 'Messages',
         'you': 'You',
         'support_label': 'Support',
-        'reply_button': 'Reply',
-        'back_to_support': 'Back to Support',
+        'reply_button': '💬 Reply',
+        'back_to_support': '🔙 Back to Support',
         'creating_ticket': 'Creating Ticket',
         'send_subject': 'Send the ticket subject in the next message:',
         'subject_saved': 'Subject saved. Now send the message text:',
@@ -2257,7 +2294,7 @@ TRANSLATIONS = {
         'support': '支持',
         'settings': '⚙️ 设置',
         'currency': '货币',
-        'language': '语言',
+        'language': '🌐 语言',
         'select_currency': '选择货币:',
         'select_language': '选择语言:',
         'settings_saved': '✅ 设置已保存',
@@ -2284,7 +2321,7 @@ TRANSLATIONS = {
         'go_to_payment': '前往支付',
         'pay_with_balance': '使用余额支付',
         'insufficient_balance': '余额不足',
-        'top_up_balance': '充值余额',
+        'top_up_balance': '💰 充值余额',
         'enter_amount': '输入充值金额',
         'invalid_amount': '无效金额',
         'select_topup_method': '选择充值方式',
@@ -2292,11 +2329,11 @@ TRANSLATIONS = {
         'balance': '余额',
         'amount': '金额',
         'select_amount_hint': '选择金额或输入自定义金额',
-        'enter_custom_amount': '输入自定义金额',
+        'enter_custom_amount': '✏️ 输入自定义金额',
         'send_amount': '发送充值金额（数字）',
         'invalid_amount_format': '金额格式无效。请输入数字（例如：1500）',
         'amount_too_small': '最低充值金额：1',
-        'go_to_payment_button': '前往支付',
+        'go_to_payment_button': '💳 前往支付',
         'go_to_payment_text': '前往链接进行支付',
         'after_payment': '支付后余额将自动充值',
         'payment_successful': '支付成功处理',
@@ -2346,24 +2383,25 @@ TRANSLATIONS = {
         'password_set': '已设置（不可用）',
         'password_not_set': '未设置密码',
         'data_not_found': '未找到数据',
-        'connect_button': '连接',
-        'activate_trial_button': '激活试用',
-        'select_tariff_button': '选择套餐',
+        'connect_button': '🚀 连接VPN',
+        'activate_trial_button': '💡 激活试用',
+        'select_tariff_button': '💎 选择套餐',
         'main_menu_button': '主菜单',
-        'status_button': '我的订阅',
-        'tariffs_button': '套餐',
-        'options_button': '选项',
-        'configs_button': '配置',
-        'servers_button': '服务器',
-        'referrals_button': '推荐',
-        'support_button': '支持',
-        'support_bot_button': '支持机器人',
-        'administration_button': '管理',
-        'settings_button': '设置',
-        'cabinet_button': 'Web кабинет',
+        'status_button': '📊 我的订阅',
+        'tariffs_button': '💎 套餐',
+        'options_button': '📦 选项',
+        'configs_button': '🧩 配置',
+        'servers_button': '🌐 服务器',
+        'referrals_button': '🎁 推荐',
+        'support_button': '💬 支持',
+        'contact_support_button': '💬 联系支持',
+        'support_bot_button': '🤖 支持机器人',
+        'administration_button': '👮 管理',
+        'settings_button': '⚙️ 设置',
+        'cabinet_button': '📱 Web кабинет',
         'documents_button': '文件',
-        'user_agreement_button': '协议',
-        'offer_button': '要约',
+        'user_agreement_button': '📄 协议',
+        'offer_button': '📋 要约',
         'refund_policy_button': '退款政策',
         'user_agreement_title': '📄 用户协议',
         'offer_title': '📋 公开要约',
@@ -2384,7 +2422,7 @@ TRANSLATIONS = {
         'available_options': '可用选项',
         'select_duration': '选择订阅时长',
         'per_day': '天',
-        'back_to_type': '返回类型选择',
+        'back_to_type': '🔙 返回类型选择',
         'servers_title': '服务器',
         'available_servers': '可用服务器',
         'total_servers': '总服务器数',
@@ -2412,11 +2450,11 @@ TRANSLATIONS = {
         'duration_label': '时长',
         'payment_methods': '选择支付方式',
         'no_payment_methods': '没有可用的支付方式。请联系支持。',
-        'back_to_tariffs': '返回套餐',
+        'back_to_tariffs': '🔙 返回套餐',
         'payment_created_title': '支付已创建',
         'go_to_payment_text': '转到链接进行支付：',
         'after_payment': '支付成功后，订阅将自动激活。',
-        'go_to_payment_button': '前往支付',
+        'go_to_payment_button': '💳 前往支付',
         'trial_activated_title': '试用已激活！',
         'trial_days_received': '您获得了3天的高级访问权限。',
         'enjoy_vpn': '享受无限制的VPN！',
@@ -2430,13 +2468,19 @@ TRANSLATIONS = {
         'registration_error': '注册错误',
         'registration_failed': '注册失败。请稍后重试或在网站上注册：',
         'ticket_view_title': '工单',
+        'try_again_button': '🔙 重试',
+        'copy_token_button': '📋 复制令牌',
+        'my_configs_button': '🧩 我的订阅',
+        'new_subscription_button': '➕ 新订阅',
+        'extend_button': '💎 续订',
+        'share_button': '📤 分享',
         'status_label': '状态',
         'subject_label': '主题',
         'messages_label': '消息',
         'you': '您',
         'support_label': '支持',
-        'reply_button': '回复',
-        'back_to_support': '返回支持',
+        'reply_button': '💬 回复',
+        'back_to_support': '🔙 返回支持',
         'creating_ticket': '创建工单',
         'send_subject': '在下一个消息中发送工单主题：',
         'subject_saved': '主题已保存。现在发送消息文本：',
@@ -2475,8 +2519,9 @@ TRANSLATIONS = {
 }
 
 def get_text(key: str, lang: str = 'ru') -> str:
-    """Получить переведенный текст (с приоритетом кастомных из админки)"""
-    # Сначала проверяем кастомные переводы из админки
+    """Получить переведенный текст (с приоритетом кастомных из админки).
+    Названия кнопок (user_agreement_button, offer_button и др.) берутся из Конструктора бота /admin/bot-constructor."""
+    # Сначала проверяем кастомные переводы из админки (Конструктор бота)
     custom = get_custom_translation(key, lang)
     if custom:
         # Заменяем {SERVICE_NAME} на актуальное название
@@ -2639,8 +2684,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "⚠️ Если вы считаете, что вас заблокировали ошибочно, свяжитесь с администрацией.\n\n"
         text += "💬 Для связи с поддержкой используйте кнопку ниже:"
         
+        lang = get_user_lang(None, context, None)
         keyboard = [
-            [InlineKeyboardButton("💬 Связаться с поддержкой", callback_data="support")]
+            [InlineKeyboardButton(get_text('contact_support_button', lang), callback_data="support")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -2718,8 +2764,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # ВАЖНО: /start всегда должен показывать главное меню (баланс/статус/трафик),
     # чтобы кастомные тексты (например, из рассылок) не подменяли основной экран.
-    welcome_text = f"🛡 **{get_text('stealthnet_bot', user_lang)}**\n"
-    welcome_text += f"👋 {get_text('main_menu_button', user_lang)}\n"
+    welcome_text = f"{get_emoji('HEADER')} **{get_text('stealthnet_bot', user_lang)}**\n"
+    welcome_text += f"{get_text('main_menu_button', user_lang)}\n"
     welcome_text += f" {get_text('your_id', user_lang)}: {telegram_id}\n"
     welcome_text += "━━━━━━━━━━━━━━━\n"
     
@@ -2727,23 +2773,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     balance = user_data.get("balance", 0)
     preferred_currency = user_data.get("preferred_currency", "uah")
     currency_symbol = {"uah": "₴", "rub": "₽", "usd": "$"}.get(preferred_currency, "₴")
-    welcome_text += f"💰 **{get_text('balance', user_lang)}:** {balance:.2f} {currency_symbol}\n"
-    
+    welcome_text += f"{get_emoji('BALANCE')} **{get_text('balance', user_lang)}:** {balance:.2f} {currency_symbol}\n"
+
     # Статус подписки
     if has_active_subscription and expire_date:
         # Статус с индикатором - в одну строку
-        status_icon = "🟢" if days_left > 7 else "🟡" if days_left > 0 else "🔴"
-        welcome_text += f"📊 **{get_text('subscription_status_title', user_lang)}** - {status_icon} {get_text('active', user_lang)}\n"
+        status_icon = get_emoji("ACTIVE_GREEN") if days_left > 7 else get_emoji("ACTIVE_YELLOW") if days_left > 0 else get_emoji("INACTIVE")
+        welcome_text += f"{get_emoji('STATUS')} **{get_text('subscription_status_title', user_lang)}** - {status_icon} {get_text('active', user_lang)}\n"
         
         # Дата с "до"
+        ed = get_emoji("DATE")
         if user_lang == 'ru':
-            welcome_text += f"📅 до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            welcome_text += f"{ed} до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
         elif user_lang == 'ua':
-            welcome_text += f"📅 до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            welcome_text += f"{ed} до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
         elif user_lang == 'en':
-            welcome_text += f"📅 until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            welcome_text += f"{ed} until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
         else:
-            welcome_text += f"📅 {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            welcome_text += f"{ed} {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
         
         # Дни с правильным склонением (days_left уже > 0 здесь)
         if user_lang == 'ru':
@@ -2753,7 +2800,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 days_text = f"{days_left} дня"
             else:
                 days_text = f"{days_left} дней"
-            welcome_text += f"⏰ осталось {days_text}\n"
+            welcome_text += f"{get_emoji('TIME')} осталось {days_text}\n"
         elif user_lang == 'ua':
             if days_left == 1:
                 days_text = f"{days_left} день"
@@ -2761,25 +2808,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 days_text = f"{days_left} дні"
             else:
                 days_text = f"{days_left} днів"
-            welcome_text += f"⏰ залишилось {days_text}\n"
+            welcome_text += f"{get_emoji('TIME')} залишилось {days_text}\n"
         elif user_lang == 'en':
             days_text = f"{days_left} day{'s' if days_left != 1 else ''}"
-            welcome_text += f"⏰ {days_text} left\n"
+            welcome_text += f"{get_emoji('TIME')} {days_text} left\n"
         else:
             days_text = get_days_text(days_left, user_lang)
-            welcome_text += f"⏰ {days_text}\n"
+            welcome_text += f"{get_emoji('TIME')} {days_text}\n"
         
         # Устройства (доступное количество из тарифа)
         hwid_limit = user_data.get("hwidDeviceLimit")
         if hwid_limit is not None:
             if hwid_limit == -1 or hwid_limit >= 100:
-                welcome_text += f"📱 **Устройств:** {get_text('devices_unlimited', user_lang)}\n"
+                welcome_text += f"{get_emoji('DEVICES')} **Устройств:** {get_text('devices_unlimited', user_lang)}\n"
             else:
-                welcome_text += f"📱 **Устройств:** {hwid_limit} {get_text('devices_available', user_lang)}\n"
+                welcome_text += f"{get_emoji('DEVICES')} **Устройств:** {hwid_limit} {get_text('devices_available', user_lang)}\n"
         
         # Трафик - в одну строку
         if traffic_limit == 0:
-            welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
+            welcome_text += f"{get_emoji('TRAFFIC')} **{get_text('traffic_title', user_lang)}**  - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
         else:
             used_gb = used_traffic / (1024 ** 3)
             limit_gb = traffic_limit / (1024 ** 3)
@@ -2788,20 +2835,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             filled = int(percentage / (100 / 15))
             filled = min(filled, 15)
             progress_bar = "█" * filled + "░" * (15 - filled)
-            progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
+            progress_color = get_emoji("ACTIVE_GREEN") if percentage < 70 else get_emoji("ACTIVE_YELLOW") if percentage < 90 else get_emoji("INACTIVE")
             
-            welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
+            welcome_text += f"{get_emoji('TRAFFIC')} **{get_text('traffic_title', user_lang)}**  - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
         
-        # Ссылка подключения (своя для каждого пользователя)
+        # Ссылка подключения: в тексте — для копирования (не кликается), кнопка «Подключиться» — открывает
         if subscription_url:
-            welcome_text += f"🔗 **{get_text('subscription_link', user_lang)}:**\n"
-            welcome_text += f"`{subscription_url}`\n"
+            welcome_text += f"{get_emoji('LINK')} **{get_text('subscription_link', user_lang)}:**\n"
+            welcome_text += f"{_subscription_url_for_copy(subscription_url)}\n"
         
         welcome_text += "━━━━━━━━━━━━━━━\n"
     else:
-        welcome_text += f"📊 **{get_text('subscription_status_title', user_lang)}**\n"
-        welcome_text += f"🔴 {get_text('inactive', user_lang)}\n"
-        welcome_text += f"💡 {get_text('activate_trial_button', user_lang)}\n"
+        welcome_text += f"{get_emoji('STATUS')} **{get_text('subscription_status_title', user_lang)}**\n"
+        welcome_text += f"{get_emoji('INACTIVE')} {get_text('inactive', user_lang)}\n"
+        _act_btn = get_text('activate_trial_button', user_lang)
+        _act_plain = _act_btn.lstrip(get_emoji('TRIAL') + ' ').lstrip('🎁 ').strip() or _act_btn
+        welcome_text += f"{get_emoji('TRIAL')} {_act_plain}\n"
         welcome_text += "━━━━━━━━━━━━━━━\n"
     
     # Кнопки главного меню - строим динамически из конфига
@@ -2811,7 +2860,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Если текст содержит карточки, убираем Markdown-форматирование
+    # Кастомные эмодзи по emoji-id показываем всем (parse_mode=HTML)
     if has_cards(welcome_text):
         welcome_text_clean = clean_markdown_for_cards(welcome_text)
         await reply_with_logo(
@@ -2821,23 +2870,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context=context
         )
     else:
-        # Для текста без карточек используем Markdown
         try:
+            welcome_html = welcome_text_to_html_with_tg_emoji(welcome_text, user_lang)
             await reply_with_logo(
                 update,
-                welcome_text,
+                welcome_html,
                 reply_markup=reply_markup,
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 context=context
             )
         except Exception as e:
-            logger.warning(f"Markdown parsing error, sending without formatting: {e}")
-            await reply_with_logo(
-                update,
-                clean_markdown_for_cards(welcome_text),
-                reply_markup=reply_markup,
-                context=context
-            )
+            logger.warning(f"HTML (tg-emoji) parsing error, fallback to Markdown: {e}")
+            try:
+                await reply_with_logo(
+                    update,
+                    welcome_text,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown",
+                    context=context
+                )
+            except Exception as e2:
+                await reply_with_logo(
+                    update,
+                    clean_markdown_for_cards(welcome_text),
+                    reply_markup=reply_markup,
+                    context=context
+                )
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2958,10 +3016,10 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
             status_text += f"📈 {get_text('traffic_title', user_lang)} - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
         
-        # Ссылка подключения
+        # Ссылка подключения (в тексте — для копирования, не открывается по тапу)
         if subscription_url:
             status_text += f"🔗 {get_text('subscription_link', user_lang)}:\n"
-            status_text += f"`{subscription_url}`\n"
+            status_text += f"{_subscription_url_for_copy(subscription_url)}\n"
         
         status_text += "--------------------------------\n"
     else:
@@ -3005,15 +3063,15 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Кнопки действий
     keyboard = []
     
-    # Кнопка подключения (если есть активная подписка и ссылка)
+    # Кнопка подключения (открывает ссылку). Ссылка в тексте выше — нажатием на неё копируется (как в «поделиться подпиской»).
     if is_active and subscription_url:
         keyboard.append([
-            InlineKeyboardButton(f"🚀 {get_text('connect_button', user_lang)}", url=subscription_url)
+            InlineKeyboardButton(get_text('connect_button', user_lang), url=subscription_url)
         ])
     
     keyboard.append([
-        InlineKeyboardButton(f"💎 {get_text('select_tariff_button', user_lang)}", callback_data="tariffs"),
-        InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")
+        InlineKeyboardButton(get_text('select_tariff_button', user_lang), callback_data="tariffs"),
+        InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -3021,15 +3079,15 @@ async def show_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Используем безопасную функцию для редактирования/отправки
     if has_cards(status_text):
         status_text_clean = clean_markdown_for_cards(status_text)
-        await safe_edit_or_send_with_logo(update, context, status_text_clean, reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(update, context, status_text_clean, reply_markup=reply_markup, logo_page="subscription_status")
     else:
         # Для текста без карточек используем Markdown
         try:
-            await safe_edit_or_send_with_logo(update, context, status_text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(update, context, status_text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="subscription_status")
         except Exception as e:
             logger.warning(f"Error in show_status, sending without formatting: {e}")
             status_text_clean = clean_markdown_for_cards(status_text)
-            await safe_edit_or_send_with_logo(update, context, status_text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(update, context, status_text_clean, reply_markup=reply_markup, logo_page="subscription_status")
 
 
 async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3063,10 +3121,10 @@ async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_T
     preferred_currency = user_data.get("preferred_currency", "uah")
     currency_symbol = {"uah": "₴", "rub": "₽", "usd": "$"}.get(preferred_currency, "₴")
 
-    text = f"📊 {get_text('subscription_status_title', user_lang)}\n"
+    text = f"{get_emoji('STATUS')} {get_text('subscription_status_title', user_lang)}\n"
     text += f" ID: {telegram_id}\n"
     text += f"{SEPARATOR_LINE}\n"
-    text += f"💰 {get_text('balance', user_lang)}: {balance:.2f} {currency_symbol}\n"
+    text += f"{get_emoji('BALANCE')} {get_text('balance', user_lang)}: {balance:.2f} {currency_symbol}\n"
 
     has_active_subscription = False
     expire_date = None
@@ -3083,39 +3141,40 @@ async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_T
             has_active_subscription = False
 
     if has_active_subscription and expire_date:
-        status_icon = "🟢" if days_left > 7 else "🟡" if days_left > 0 else "🔴"
-        text += f"📊 {get_text('subscription_status_title', user_lang)} - {status_icon} {get_text('active', user_lang)}\n"
+        status_icon = get_emoji("ACTIVE_GREEN") if days_left > 7 else get_emoji("ACTIVE_YELLOW") if days_left > 0 else get_emoji("INACTIVE")
+        text += f"{get_emoji('STATUS')} {get_text('subscription_status_title', user_lang)} - {status_icon} {get_text('active', user_lang)}\n"
+        ed = get_emoji("DATE")
         if user_lang == 'ru':
-            text += f"📅 До {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            text += f"{ed} До {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
         elif user_lang == 'ua':
-            text += f"📅 До {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            text += f"{ed} До {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
         elif user_lang == 'en':
-            text += f"📅 Until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            text += f"{ed} Until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
         else:
-            text += f"📅 {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            text += f"{ed} {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        et = get_emoji("TIME")
         if user_lang == 'ru':
             days_part = get_days_text(days_left, user_lang)
-            text += f"⏰ Осталось {days_part}\n"
+            text += f"{et} Осталось {days_part}\n"
         elif user_lang == 'ua':
             days_part = get_days_text(days_left, user_lang)
-            text += f"⏰ Залишилось {days_part}\n"
+            text += f"{et} Залишилось {days_part}\n"
         elif user_lang == 'en':
             days_part = get_days_text(days_left, user_lang)
-            text += f"⏰ {days_part} left\n"
+            text += f"{et} {days_part} left\n"
         else:
-            text += f"⏰ {get_days_text(days_left, user_lang)}\n"
-        # Устройства из тарифа
+            text += f"{et} {get_days_text(days_left, user_lang)}\n"
         hwid_limit = user_data.get("hwidDeviceLimit")
         if hwid_limit is not None:
             if hwid_limit == -1 or hwid_limit >= 100:
-                text += f"📱 Устройств: {get_text('devices_unlimited', user_lang)}\n"
+                text += f"{get_emoji('DEVICES')} Устройств: {get_text('devices_unlimited', user_lang)}\n"
             else:
-                text += f"📱 Устройств: {hwid_limit} {get_text('devices_available', user_lang)}\n"
+                text += f"{get_emoji('DEVICES')} Устройств: {hwid_limit} {get_text('devices_available', user_lang)}\n"
     else:
-        text += f"📊 {get_text('subscription_status_title', user_lang)} - 🔴 {get_text('inactive', user_lang)}\n"
+        text += f"{get_emoji('STATUS')} {get_text('subscription_status_title', user_lang)} - {get_emoji('INACTIVE')} {get_text('inactive', user_lang)}\n"
 
     if traffic_limit == 0:
-        text += f"📈 {get_text('traffic_title', user_lang)} - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
+        text += f"{get_emoji('TRAFFIC')} {get_text('traffic_title', user_lang)} - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
     else:
         used_gb = used_traffic / (1024 ** 3)
         limit_gb = traffic_limit / (1024 ** 3)
@@ -3123,37 +3182,36 @@ async def show_subscription_menu(update: Update, context: ContextTypes.DEFAULT_T
         filled = int(percentage / (100 / 15))
         filled = min(filled, 15)
         progress_bar = "█" * filled + "░" * (15 - filled)
-        progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
-        text += f"📈 {get_text('traffic_title', user_lang)} - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
+        progress_color = get_emoji("ACTIVE_GREEN") if percentage < 70 else get_emoji("ACTIVE_YELLOW") if percentage < 90 else get_emoji("INACTIVE")
+        text += f"{get_emoji('TRAFFIC')} {get_text('traffic_title', user_lang)} - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
 
     if has_active_subscription and subscription_url:
-        text += f"🔗 {get_text('subscription_link', user_lang)}:\n"
-        text += f"`{subscription_url}`\n"
+        text += f"{get_emoji('LINK')} {get_text('subscription_link', user_lang)}:\n"
+        text += f"{_subscription_url_for_copy(subscription_url)}\n"
 
     text += f"{SEPARATOR_LINE}\n"
 
     keyboard = []
 
-    # Быстрые действия
-    actions_row = [InlineKeyboardButton(f"🧩 {get_text('configs_button', user_lang)}", callback_data="sub_configs")]
+    actions_row = [InlineKeyboardButton(get_text('configs_button', user_lang), callback_data="sub_configs")]
     if is_button_visible('servers'):
-        actions_row.append(InlineKeyboardButton(f"🌐 {get_text('servers_button', user_lang)}", callback_data="sub_servers"))
+        actions_row.append(InlineKeyboardButton(get_text('servers_button', user_lang), callback_data="sub_servers"))
     keyboard.append(actions_row)
 
     if is_button_visible('topup'):
-        keyboard.append([InlineKeyboardButton(f"💰 {get_text('top_up_balance', user_lang)}", callback_data="sub_topup")])
+        keyboard.append([InlineKeyboardButton(get_text('top_up_balance', user_lang), callback_data="sub_topup")])
 
-    keyboard.append([InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")])
+    keyboard.append([InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     temp_update = Update(update_id=0, callback_query=query)
     if has_cards(text):
-        await safe_edit_or_send_with_logo(temp_update, context, clean_markdown_for_cards(text), reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(temp_update, context, clean_markdown_for_cards(text), reply_markup=reply_markup, logo_page="subscription_menu")
     else:
         try:
-            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="subscription_menu")
         except Exception:
-            await safe_edit_or_send_with_logo(temp_update, context, clean_markdown_for_cards(text), reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(temp_update, context, clean_markdown_for_cards(text), reply_markup=reply_markup, logo_page="subscription_menu")
 
 
 async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3214,9 +3272,9 @@ async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     extra_links = []
     if support_bot_url:
-        extra_links.append(InlineKeyboardButton(f"🤖 {get_text('support_bot_button', user_lang)}", url=support_bot_url))
+        extra_links.append(InlineKeyboardButton(get_text('support_bot_button', user_lang), url=support_bot_url))
     if admin_url:
-        extra_links.append(InlineKeyboardButton(f"👮 {get_text('administration_button', user_lang)}", url=admin_url))
+        extra_links.append(InlineKeyboardButton(get_text('administration_button', user_lang), url=admin_url))
     if extra_links:
         # 1-2 кнопки в ряд
         keyboard.append(extra_links)
@@ -3255,21 +3313,21 @@ async def show_support_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_button_visible('agreement'):
         if agreement_url:
-            keyboard.append([InlineKeyboardButton(f"📄 {get_text('user_agreement_button', user_lang)}", url=agreement_url)])
+            keyboard.append([InlineKeyboardButton(get_text('user_agreement_button', user_lang), url=agreement_url)])
         else:
-            keyboard.append([InlineKeyboardButton(f"📄 {get_text('user_agreement_button', user_lang)}", callback_data="support_agreement")])
+            keyboard.append([InlineKeyboardButton(get_text('user_agreement_button', user_lang), callback_data="support_agreement")])
 
     if is_button_visible('offer'):
         if offer_url:
-            keyboard.append([InlineKeyboardButton(f"📋 {get_text('offer_button', user_lang)}", url=offer_url)])
+            keyboard.append([InlineKeyboardButton(get_text('offer_button', user_lang), url=offer_url)])
         else:
-            keyboard.append([InlineKeyboardButton(f"📋 {get_text('offer_button', user_lang)}", callback_data="support_offer")])
+            keyboard.append([InlineKeyboardButton(get_text('offer_button', user_lang), callback_data="support_offer")])
 
-    keyboard.append([InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")])
+    keyboard.append([InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     temp_update = Update(update_id=0, callback_query=query)
-    await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+    await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="support_menu")
 
 async def show_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать выбор типа тарифа (Basic/Pro/Elite)"""
@@ -3287,8 +3345,9 @@ async def show_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.answer("❌ Тарифы не найдены")
         return
     
-    # Получаем валюту пользователя
+    # Получаем валюту и язык пользователя
     token, user_data = get_user_data_safe(telegram_id, token)
+    user_lang = get_user_lang(user_data, context, token)
     currency = user_data.get("preferred_currency", "uah") if user_data else "uah"
     
     currency_map = {
@@ -3344,13 +3403,13 @@ async def show_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         groups[tier].append(tariff)
 
     # Формируем сообщение с выбором уровня тарифа
-    text = "💎 **Тарифные планы**\n"
+    text = f"{get_emoji('TARIFFS')} **Тарифные планы**\n"
     text += "━━━━━━━━━━━━━━━\n"
 
     tier_icons = {
-        "basic": "📦",
-        "pro": "⭐️",
-        "elite": "👑"
+        "basic": get_emoji("PACKAGE"),
+        "pro": get_emoji("STAR"),
+        "elite": get_emoji("CROWN")
     }
 
     for code in ordered_codes:
@@ -3358,8 +3417,8 @@ async def show_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not tier_tariffs:
             continue
         min_price = min(t.get(currency_config["field"], 0) for t in tier_tariffs)
-        icon = tier_icons.get(code, "⭐️")
-        text += f"{icon} {tier_names.get(code, code)} |💰От {min_price:.0f} {symbol}\n"
+        icon = tier_icons.get(code, get_emoji("STAR"))
+        text += f"{icon} {tier_names.get(code, code)} |{get_emoji('BALANCE')}От {min_price:.0f} {symbol}\n"
 
     text += "━━━━━━━━━━━━━━━\n"
 
@@ -3368,28 +3427,25 @@ async def show_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tier_tariffs = groups.get(code, [])
         if not tier_tariffs:
             continue
-        icon = tier_icons.get(code, "⭐")
+        icon = tier_icons.get(code, get_emoji("STAR"))
         label = tier_names.get(code, code)
         keyboard.append([InlineKeyboardButton(f"{icon} {label}", callback_data=f"tier_{code}")])
     
     keyboard.append([
-        InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")
+        InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # Используем безопасную функцию для редактирования/отправки
     if has_cards(text):
         text_clean = clean_markdown_for_cards(text)
-        await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="tariffs")
     else:
-        # Для текста без карточек используем Markdown
         try:
-            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="tariffs")
         except Exception as e:
             logger.warning(f"Error in show_tariffs, sending without formatting: {e}")
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="tariffs")
 
 
 async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, tier: str):
@@ -3412,8 +3468,9 @@ async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         await query.answer("❌ Тарифы не найдены")
         return
     
-    # Получаем валюту пользователя
+    # Получаем валюту и язык пользователя
     token, user_data = get_user_data_safe(telegram_id, token)
+    user_lang = get_user_lang(user_data, context, token)
     currency = user_data.get("preferred_currency", "uah") if user_data else "uah"
     
     currency_map = {
@@ -3497,11 +3554,11 @@ async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 "icon": "✓"
             })
     
-    # Определяем название тарифа и иконку
-    tier_icons = {"basic": "📦", "pro": "⭐", "elite": "👑"}
+    # Определяем название тарифа и иконку (из .env для премиум)
+    tier_icons = {"basic": get_emoji("PACKAGE"), "pro": get_emoji("STAR"), "elite": get_emoji("CROWN")}
     tier_info = {
         "name": tier_names_plain.get(str(tier), str(tier)),
-        "icon": tier_icons.get(str(tier), "⭐"),
+        "icon": tier_icons.get(str(tier), get_emoji("STAR")),
     }
     
     # Генерируем изображение
@@ -3551,7 +3608,7 @@ async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             keyboard.append(row)
         
         keyboard.append([
-            InlineKeyboardButton("🔙 К выбору типа", callback_data="tariffs")
+            InlineKeyboardButton(get_text('back_to_type', user_lang), callback_data="tariffs")
         ])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -3590,21 +3647,21 @@ async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         text += "━━━━━━━━━━━━━━━\n"
         
         if processed_features:
-            text += "✨ **Включено в тариф:**\n"
+            text += "✨ **Включено в тариф:**\n"  # ✨ не в .env, оставляем как есть
             for feature in processed_features:
                 text += f"{feature['icon']} {feature['name']}\n"
             if len(features_list) > 5:
                 text += f"... и еще {len(features_list) - 5} функций\n"
             text += "\n"
         
-        text += "📅 Выберите длительность:\n\n"
+        text += f"{get_emoji('DATE')} Выберите длительность:\n\n"
         
         for tariff in tier_tariffs:
             name = tariff.get("name", f"{tariff.get('duration_days', 0)} дней")
             price = tariff.get(price_field, 0)
             duration = tariff.get("duration_days", 0)
             per_day = price / duration if duration > 0 else price
-            text += f"📦 {name} | 💰 {price:.0f} {symbol} | 📊 {per_day:.2f} {symbol}/день | ⏱️ {duration} дней\n"
+            text += f"{get_emoji('PACKAGE')} {name} | {get_emoji('BALANCE')} {price:.0f} {symbol} | {get_emoji('STATUS')} {per_day:.2f} {symbol}/день | {get_emoji('DURATION')} {duration} дней\n"
         
         text += "━━━━━━━━━━━━━━━\n"
         
@@ -3621,16 +3678,16 @@ async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 row = []
         if row:
             keyboard.append(row)
-        keyboard.append([InlineKeyboardButton("🔙 К выбору типа", callback_data="tariffs")])
+        keyboard.append([InlineKeyboardButton(get_text('back_to_type', user_lang), callback_data="tariffs")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         temp_update = Update(update_id=0, callback_query=query)
         try:
-            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="tariffs")
         except Exception as e:
             logger.warning(f"Error in show_tier_tariffs, sending without formatting: {e}")
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup, logo_page="tariffs")
     except Exception as e:
         logger.error(f"Error generating tariff image: {e}")
         import traceback
@@ -3653,14 +3710,14 @@ async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 text += f"... и еще {len(features_list) - 5} функций\n"
             text += "\n"
         
-        text += "📅 Выберите длительность:\n\n"
+        text += f"{get_emoji('DATE')} Выберите длительность:\n\n"
         
         for tariff in tier_tariffs:
             name = tariff.get("name", f"{tariff.get('duration_days', 0)} дней")
             price = tariff.get(price_field, 0)
             duration = tariff.get("duration_days", 0)
             per_day = price / duration if duration > 0 else price
-            text += f"📦 {name} | 💰 {price:.0f} {symbol} | 📊 {per_day:.2f} {symbol}/день | ⏱️ {duration} дней\n"
+            text += f"{get_emoji('PACKAGE')} {name} | {get_emoji('BALANCE')} {price:.0f} {symbol} | {get_emoji('STATUS')} {per_day:.2f} {symbol}/день | {get_emoji('DURATION')} {duration} дней\n"
         
         text += "━━━━━━━━━━━━━━━\n"
         
@@ -3677,16 +3734,16 @@ async def show_tier_tariffs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 row = []
         if row:
             keyboard.append(row)
-        keyboard.append([InlineKeyboardButton("🔙 К выбору типа", callback_data="tariffs")])
+        keyboard.append([InlineKeyboardButton(get_text('back_to_type', user_lang), callback_data="tariffs")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         temp_update = Update(update_id=0, callback_query=query)
         try:
-            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="tariffs")
         except Exception as e2:
             logger.warning(f"Error in show_tier_tariffs fallback, sending without formatting: {e2}")
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup, logo_page="tariffs")
 
 
 async def show_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3711,8 +3768,8 @@ async def show_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "📦 **Опции**\n\n"
     if not (traffic or devices or squad):
         text += "❌ Сейчас нет доступных опций для покупки."
-        keyboard = [[InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]]
-        await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        keyboard = [[InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]]
+        await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown", logo_page="options")
         return
 
     text += f"Валюта: {symbol}\n\nВыберите категорию:"
@@ -3724,9 +3781,9 @@ async def show_options(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton(f"📱 Устройства ({len(devices)})", callback_data="optcat_devices")])
     if squad:
         keyboard.append([InlineKeyboardButton(f"👥 Сквады ({len(squad)})", callback_data="optcat_squad")])
-    keyboard.append([InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")])
+    keyboard.append([InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")])
 
-    await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown", logo_page="options")
 
 
 async def show_options_category(update: Update, context: ContextTypes.DEFAULT_TYPE, option_type: str):
@@ -3753,10 +3810,10 @@ async def show_options_category(update: Update, context: ContextTypes.DEFAULT_TY
     if not items:
         text += "❌ Нет доступных опций."
         keyboard = [
-            [InlineKeyboardButton("🔙 Назад", callback_data="options")],
-            [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+            [InlineKeyboardButton(get_text('back', user_lang), callback_data="options")],
+            [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
         ]
-        await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown", logo_page="options")
         return
 
     text += f"Валюта: {symbol}\n\nВыберите опцию:"
@@ -3788,10 +3845,10 @@ async def show_options_category(update: Update, context: ContextTypes.DEFAULT_TY
             label = label[:57] + "..."
         keyboard.append([InlineKeyboardButton(label, callback_data=f"opt_{opt_id}")])
 
-    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="options")])
-    keyboard.append([InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")])
+    keyboard.append([InlineKeyboardButton(get_text('back', user_lang), callback_data="options")])
+    keyboard.append([InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")])
 
-    await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown", logo_page="options")
 
 
 async def show_option_payment_methods(update: Update, context: ContextTypes.DEFAULT_TYPE, option_id: int):
@@ -3817,16 +3874,23 @@ async def show_option_payment_methods(update: Update, context: ContextTypes.DEFA
 
     available_methods = api.get_available_payment_methods()
     if not available_methods:
+        await query.answer()
         text = "❌ Нет доступных способов оплаты. Настройте платежки в админке."
-        keyboard = [[InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data="options")]]
-        await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard))
+        keyboard = [[InlineKeyboardButton(get_text('back', user_lang), callback_data="options")]]
+        await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), logo_page="options")
         return
 
-    # Получаем информацию об опции для проверки баланса
-    from modules.models.option import PurchaseOption
-    from modules.currency import convert_to_usd, convert_from_usd
-    option = PurchaseOption.query.get(option_id)
-    
+    # Информация об опции и балансе — только через API (без доступа к БД из бота)
+    options = api.get_purchase_options() or {}
+    option = None
+    for key in ("traffic", "devices", "squad"):
+        for opt in (options.get(key) or []):
+            if opt.get("id") == option_id:
+                option = opt
+                break
+        if option:
+            break
+
     text = "💳 **Способ оплаты**\n\nВыберите метод оплаты:"
     keyboard = []
 
@@ -3858,22 +3922,17 @@ async def show_option_payment_methods(update: Update, context: ContextTypes.DEFA
 
     # Добавляем кнопку оплаты с баланса, если опция найдена
     if option:
-        currency_price_map = {
-            "uah": ("UAH", option.price_uah),
-            "rub": ("RUB", option.price_rub),
-            "usd": ("USD", option.price_usd)
-        }
-        currency_code, option_price = currency_price_map.get(str(currency).lower(), ("RUB", option.price_rub))
-        
+        c = str(currency).lower()
+        option_price = float(option.get("price_uah") if c == "uah" else option.get("price_rub") if c == "rub" else option.get("price_usd", 0) or option.get("price_rub", 0))
+        currency_code = "UAH" if c == "uah" else "USD" if c == "usd" else "RUB"
+        balance_usd = float(user_data.get("balance_usd") or user_data.get("balance") or 0) if user_data else 0.0
+        # Простая конвертация в USD по курсу (как в API)
+        rates = {"UAH": 41.0, "RUB": 95.0, "USD": 1.0}
+        rate = rates.get(currency_code, 1.0)
+        option_price_usd = option_price / rate if rate else option_price
+        can_afford = balance_usd >= option_price_usd
+
         if option_price and option_price > 0:
-            # Получаем баланс пользователя
-            from modules.models.user import User
-            user = User.query.filter_by(telegram_id=str(telegram_id)).first()
-            balance_usd = float(user.balance) if user and user.balance else 0.0
-            option_price_usd = convert_to_usd(option_price, currency_code)
-            
-            can_afford = balance_usd >= option_price_usd
-            
             if can_afford:
                 keyboard.append([
                     InlineKeyboardButton(
@@ -3889,8 +3948,9 @@ async def show_option_payment_methods(update: Update, context: ContextTypes.DEFA
                     )
                 ])
 
-    keyboard.append([InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data="options")])
-    await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    keyboard.append([InlineKeyboardButton(get_text('back', user_lang), callback_data="options")])
+    await query.answer()
+    await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown", logo_page="options")
 
 
 async def show_servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3922,24 +3982,23 @@ async def show_servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     back_to = pop_back_callback(context, "main_menu")
 
     if not nodes:
-        text = "🌐 **Серверы**\n\n❌ Серверы не найдены"
-        keyboard = [[InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data=back_to)]]
+        text = f"{get_emoji('SERVERS')} **Серверы**\n\n❌ Серверы не найдены"
+        keyboard = [[InlineKeyboardButton(get_text('back', user_lang), callback_data=back_to)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        # Используем безопасную функцию для редактирования/отправки
         if has_cards(text):
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="servers")
         else:
             try:
-                await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+                await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="servers")
             except Exception as e:
                 logger.warning(f"Error in show_servers, sending without formatting: {e}")
                 text_clean = clean_markdown_for_cards(text)
-                await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+                await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="servers")
         return
     
     # Формируем сообщение
-    text = f"🌐 **Доступные серверы**\n\n"
+    text = f"{get_emoji('SERVERS')} **Доступные серверы**\n\n"
     text += f"Всего серверов: {len(nodes)}\n\n"
     
     # Группируем по регионам
@@ -3951,7 +4010,7 @@ async def show_servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         regions[region].append(node)
     
     for region, region_nodes in list(regions.items())[:5]:  # Показываем первые 5 регионов
-        text += f"📍 **{region}** ({len(region_nodes)} серверов)\n"
+        text += f"{get_emoji('LOCATION')} **{region}** ({len(region_nodes)} серверов)\n"
         for node in region_nodes[:3]:  # По 3 сервера на регион
             name = node.get("nodeName", "Unknown")
             text += f"  • {name}\n"
@@ -3960,21 +4019,19 @@ async def show_servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(nodes) > 20:
         text += f"\n... и еще {len(nodes) - 20} серверов"
     
-    keyboard = [[InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data=back_to)]]
+    keyboard = [[InlineKeyboardButton(get_text('back', user_lang), callback_data=back_to)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Используем безопасную функцию для редактирования/отправки
     if has_cards(text):
         text_clean = clean_markdown_for_cards(text)
-        await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="servers")
     else:
-        # Для текста без карточек используем Markdown
         try:
-            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="servers")
         except Exception as e:
-            logger.warning(f"Error in show_tariffs, sending without formatting: {e}")
+            logger.warning(f"Error in show_servers, sending without formatting: {e}")
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="servers")
 
 
 async def show_referrals(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4030,9 +4087,9 @@ async def show_referrals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         referral_code = user_data.get("referral_code", "")
         if not referral_code:
             text = f"❌ {get_text('referral_code_not_found', user_lang)}\n"
-            keyboard = [[InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]]
+            keyboard = [[InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, logo_page="referrals")
             return
         
         # Получаем домен сервера из API
@@ -4102,23 +4159,23 @@ async def show_referrals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"`{referral_code}`\n"
     
     keyboard = [
-        [InlineKeyboardButton(f"📋 {get_text('copy_link', user_lang)}", callback_data=f"copy_ref_{referral_code}")],
-        [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+        [InlineKeyboardButton(get_text('copy_link', user_lang), callback_data=f"copy_ref_{referral_code}")],
+        [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Используем безопасную функцию для редактирования/отправки
     if has_cards(text):
         text_clean = clean_markdown_for_cards(text)
-        await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="referrals")
     else:
         # Для текста без карточек используем Markdown
         try:
-            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="referrals")
         except Exception as e:
             logger.warning(f"Error in show_referrals, sending without formatting: {e}")
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="referrals")
 
 
 async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4158,7 +4215,7 @@ async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"\n**{get_text('select_action', user_lang)}**:"
     
     keyboard = [
-        [InlineKeyboardButton(f"➕ {get_text('create_ticket_button', user_lang)}", callback_data="create_ticket")]
+        [InlineKeyboardButton(get_text('create_ticket_button', user_lang), callback_data="create_ticket")]
     ]
     
     # Добавляем кнопки для просмотра тикетов, если они есть
@@ -4177,21 +4234,21 @@ async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
     
     back_to = pop_back_callback(context, "main_menu")
-    keyboard.append([InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data=back_to)])
+    keyboard.append([InlineKeyboardButton(get_text('back', user_lang), callback_data=back_to)])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Используем безопасную функцию для редактирования/отправки
     if has_cards(text):
         text_clean = clean_markdown_for_cards(text)
-        await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="support_menu")
     else:
         # Для текста без карточек используем Markdown
         try:
-            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="support_menu")
         except Exception as e:
             logger.warning(f"Error in show_tariffs, sending without formatting: {e}")
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(update, context, text_clean, reply_markup=reply_markup, logo_page="support_menu")
 
 
 async def show_user_agreement(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4215,17 +4272,17 @@ async def show_user_agreement(update: Update, context: ContextTypes.DEFAULT_TYPE
     back_to = pop_back_callback(context, "main_menu")
     keyboard = []
     if agreement_url:
-        keyboard.append([InlineKeyboardButton(f"📄 {get_text('user_agreement_button', user_lang)}", url=agreement_url)])
-    keyboard.append([InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data=back_to)])
+        keyboard.append([InlineKeyboardButton(get_text('user_agreement_button', user_lang), url=agreement_url)])
+    keyboard.append([InlineKeyboardButton(get_text('back', user_lang), callback_data=back_to)])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Используем безопасную функцию для редактирования
     try:
         text_to_send = agreement_text if not agreement_url else f"📄 {get_text('user_agreement_title', user_lang)}\n\n{agreement_url}"
-        await safe_edit_or_send_with_logo(update, context, text_to_send, reply_markup=reply_markup, parse_mode="Markdown")
+        await safe_edit_or_send_with_logo(update, context, text_to_send, reply_markup=reply_markup, parse_mode="Markdown", logo_page="agreement")
     except Exception as e:
         logger.warning(f"Error in show_user_agreement: {e}")
-        await safe_edit_or_send_with_logo(update, context, clean_markdown_for_cards(agreement_text), reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(update, context, clean_markdown_for_cards(agreement_text), reply_markup=reply_markup, logo_page="agreement")
 
 
 async def show_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4249,17 +4306,17 @@ async def show_offer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     back_to = pop_back_callback(context, "main_menu")
     keyboard = []
     if offer_url:
-        keyboard.append([InlineKeyboardButton(f"📋 {get_text('offer_button', user_lang)}", url=offer_url)])
-    keyboard.append([InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data=back_to)])
+        keyboard.append([InlineKeyboardButton(get_text('offer_button', user_lang), url=offer_url)])
+    keyboard.append([InlineKeyboardButton(get_text('back', user_lang), callback_data=back_to)])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Используем безопасную функцию для редактирования
     try:
         text_to_send = offer_text if not offer_url else f"📋 {get_text('offer_title', user_lang)}\n\n{offer_url}"
-        await safe_edit_or_send_with_logo(update, context, text_to_send, reply_markup=reply_markup, parse_mode="Markdown")
+        await safe_edit_or_send_with_logo(update, context, text_to_send, reply_markup=reply_markup, parse_mode="Markdown", logo_page="offer")
     except Exception as e:
         logger.warning(f"Error in show_offer: {e}")
-        await safe_edit_or_send_with_logo(update, context, clean_markdown_for_cards(offer_text), reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(update, context, clean_markdown_for_cards(offer_text), reply_markup=reply_markup, logo_page="offer")
 
 
 def get_user_agreement_text(lang: str = 'ru') -> str:
@@ -4800,16 +4857,16 @@ async def show_refund_policy(update: Update, context: ContextTypes.DEFAULT_TYPE)
     policy_text = get_refund_policy_text(user_lang)
     
     keyboard = [
-        [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+        [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Используем безопасную функцию для редактирования
     try:
-        await safe_edit_or_send_with_logo(update, context, policy_text, reply_markup=reply_markup, parse_mode="Markdown")
+        await safe_edit_or_send_with_logo(update, context, policy_text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="settings")
     except Exception as e:
         logger.warning(f"Error in show_refund_policy: {e}")
-        await safe_edit_or_send_with_logo(update, context, clean_markdown_for_cards(policy_text), reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(update, context, clean_markdown_for_cards(policy_text), reply_markup=reply_markup, logo_page="settings")
 
 
 async def delete_recent_bot_messages(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_data: dict, max_messages: int = 10):
@@ -4906,8 +4963,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Получаем язык пользователя
                 user_lang = get_user_lang(user_data, context, token)
                 
-                welcome_text = f"🛡 **{get_text('stealthnet_bot', user_lang)}**\n"
-                welcome_text += f"👋 {get_text('main_menu_button', user_lang)}\n"
+                welcome_text = f"{get_emoji('HEADER')} **{get_text('stealthnet_bot', user_lang)}**\n"
+                welcome_text += f"{get_text('main_menu_button', user_lang)}\n"
                 welcome_text += f" {get_text('your_id', user_lang)}: {telegram_id}\n"
                 welcome_text += "━━━━━━━━━━━━━━━\n"
                 
@@ -4915,7 +4972,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 balance = user_data.get("balance", 0)
                 preferred_currency = user_data.get("preferred_currency", "uah")
                 currency_symbol = {"uah": "₴", "rub": "₽", "usd": "$"}.get(preferred_currency, "₴")
-                welcome_text += f"💰 **{get_text('balance', user_lang)}:** {balance:.2f} {currency_symbol}\n"
+                welcome_text += f"{get_emoji('BALANCE')} **{get_text('balance', user_lang)}:** {balance:.2f} {currency_symbol}\n"
                 
                 # Статус подписки
                 is_active = user_data.get("activeInternalSquads", [])
@@ -4941,18 +4998,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 if has_active_subscription and expire_date:
                     # Статус с индикатором - в одну строку
-                    status_icon = "🟢" if days_left > 7 else "🟡" if days_left > 0 else "🔴"
-                    welcome_text += f"📊 **{get_text('subscription_status_title', user_lang)}** - {status_icon} {get_text('active', user_lang)}\n"
+                    status_icon = get_emoji("ACTIVE_GREEN") if days_left > 7 else get_emoji("ACTIVE_YELLOW") if days_left > 0 else get_emoji("INACTIVE")
+                    welcome_text += f"{get_emoji('STATUS')} **{get_text('subscription_status_title', user_lang)}** - {status_icon} {get_text('active', user_lang)}\n"
                     
                     # Дата с "до"
+                    ed = get_emoji("DATE")
                     if user_lang == 'ru':
-                        welcome_text += f"📅 до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+                        welcome_text += f"{ed} до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
                     elif user_lang == 'ua':
-                        welcome_text += f"📅 до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+                        welcome_text += f"{ed} до {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
                     elif user_lang == 'en':
-                        welcome_text += f"📅 until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+                        welcome_text += f"{ed} until {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
                     else:
-                        welcome_text += f"📅 {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+                        welcome_text += f"{ed} {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
                     
                     # Дни с правильным склонением (days_left уже > 0 здесь)
                     if user_lang == 'ru':
@@ -4962,7 +5020,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             days_text = f"{days_left} дня"
                         else:
                             days_text = f"{days_left} дней"
-                        welcome_text += f"⏰ осталось {days_text}\n"
+                        welcome_text += f"{get_emoji('TIME')} осталось {days_text}\n"
                     elif user_lang == 'ua':
                         if days_left == 1:
                             days_text = f"{days_left} день"
@@ -4970,25 +5028,25 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             days_text = f"{days_left} дні"
                         else:
                             days_text = f"{days_left} днів"
-                        welcome_text += f"⏰ залишилось {days_text}\n"
+                        welcome_text += f"{get_emoji('TIME')} залишилось {days_text}\n"
                     elif user_lang == 'en':
                         days_text = f"{days_left} day{'s' if days_left != 1 else ''}"
-                        welcome_text += f"⏰ {days_text} left\n"
+                        welcome_text += f"{get_emoji('TIME')} {days_text} left\n"
                     else:
                         days_text = get_days_text(days_left, user_lang)
-                        welcome_text += f"⏰ {days_text}\n"
+                        welcome_text += f"{get_emoji('TIME')} {days_text}\n"
                     
                     # Устройства (доступное количество из тарифа)
                     hwid_limit = user_data.get("hwidDeviceLimit")
                     if hwid_limit is not None:
                         if hwid_limit == -1 or hwid_limit >= 100:
-                            welcome_text += f"📱 **Устройств:** {get_text('devices_unlimited', user_lang)}\n"
+                            welcome_text += f"{get_emoji('DEVICES')} **Устройств:** {get_text('devices_unlimited', user_lang)}\n"
                         else:
-                            welcome_text += f"📱 **Устройств:** {hwid_limit} {get_text('devices_available', user_lang)}\n"
+                            welcome_text += f"{get_emoji('DEVICES')} **Устройств:** {hwid_limit} {get_text('devices_available', user_lang)}\n"
                     
                     # Трафик - в одну строку
                     if traffic_limit == 0:
-                        welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
+                        welcome_text += f"{get_emoji('TRAFFIC')} **{get_text('traffic_title', user_lang)}**  - ♾️ {get_text('unlimited_traffic', user_lang)}\n"
                     else:
                         used_gb = used_traffic / (1024 ** 3)
                         limit_gb = traffic_limit / (1024 ** 3)
@@ -4997,19 +5055,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         filled = int(percentage / (100 / 15))
                         filled = min(filled, 15)
                         progress_bar = "█" * filled + "░" * (15 - filled)
-                        progress_color = "🟢" if percentage < 70 else "🟡" if percentage < 90 else "🔴"
+                        progress_color = get_emoji("ACTIVE_GREEN") if percentage < 70 else get_emoji("ACTIVE_YELLOW") if percentage < 90 else get_emoji("INACTIVE")
                         
-                        welcome_text += f"📈 **{get_text('traffic_title', user_lang)}**  - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
+                        welcome_text += f"{get_emoji('TRAFFIC')} **{get_text('traffic_title', user_lang)}**  - {progress_color} {progress_bar} {percentage:.0f}% ({used_gb:.2f} / {limit_gb:.2f} GB)\n"
                     
-                    # Ссылка подключения (своя для каждого пользователя)
+                    # Ссылка подключения (в тексте — для копирования)
                     if subscription_url:
-                        welcome_text += f"🔗 **{get_text('subscription_link', user_lang)}:**\n"
-                        welcome_text += f"`{subscription_url}`\n"
+                        welcome_text += f"{get_emoji('LINK')} **{get_text('subscription_link', user_lang)}:**\n"
+                        welcome_text += f"{_subscription_url_for_copy(subscription_url)}\n"
                     
                     welcome_text += "━━━━━━━━━━━━━━━\n"
                 else:
-                    welcome_text += f"📊 **{get_text('subscription_status_title', user_lang)}**\n"
-                    welcome_text += f"🔴 {get_text('inactive', user_lang)}\n"
+                    welcome_text += f"{get_emoji('STATUS')} **{get_text('subscription_status_title', user_lang)}**\n"
+                    welcome_text += f"{get_emoji('INACTIVE')} {get_text('inactive', user_lang)}\n"
                     welcome_text += "━━━━━━━━━━━━━━━\n"
                 
                 # Используем build_main_menu_keyboard для правильного порядка кнопок из админки
@@ -5022,42 +5080,42 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 temp_update = Update(update_id=0, callback_query=query)
                 if has_cards(welcome_text):
                     welcome_text_clean = clean_markdown_for_cards(welcome_text)
-                    await safe_edit_or_send_with_logo(temp_update, context, welcome_text_clean, reply_markup=reply_markup)
+                    await safe_edit_or_send_with_logo(temp_update, context, welcome_text_clean, reply_markup=reply_markup, logo_page="main_menu")
                 else:
                     try:
-                        await safe_edit_or_send_with_logo(temp_update, context, welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
+                        await safe_edit_or_send_with_logo(temp_update, context, welcome_text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="main_menu")
                     except Exception as e:
                         logger.warning(f"Error in main_menu, sending without formatting: {e}")
                         welcome_text_clean = clean_markdown_for_cards(welcome_text)
-                        await safe_edit_or_send_with_logo(temp_update, context, welcome_text_clean, reply_markup=reply_markup)
+                        await safe_edit_or_send_with_logo(temp_update, context, welcome_text_clean, reply_markup=reply_markup, logo_page="main_menu")
                 return
         
         # Fallback если не удалось загрузить данные
         lang = get_user_lang(None, context, token) if token else 'ru'
-        welcome_text = f"👋 {get_text('main_menu_button', lang)}\n\n"
+        welcome_text = f"{get_text('main_menu_button', lang)}\n\n"
         welcome_text += f"{get_text('select_action', lang)}:"
         
         keyboard = [
-            [InlineKeyboardButton(f"📊 {get_text('status_button', lang)}", callback_data="subscription_menu")],
+            [InlineKeyboardButton(get_text('status_button', lang), callback_data="subscription_menu")],
             [
-                InlineKeyboardButton(f"💎 {get_text('tariffs_button', lang)}", callback_data="tariffs"),
-                InlineKeyboardButton(f"📦 {get_text('options_button', lang)}", callback_data="options"),
+                InlineKeyboardButton(get_text('tariffs_button', lang), callback_data="tariffs"),
+                InlineKeyboardButton(get_text('options_button', lang), callback_data="options"),
             ],
             [
-                InlineKeyboardButton(f"🎁 {get_text('referrals_button', lang)}", callback_data="referrals"),
-                InlineKeyboardButton(f"💬 {get_text('support_button', lang)}", callback_data="support_menu"),
+                InlineKeyboardButton(get_text('referrals_button', lang), callback_data="referrals"),
+                InlineKeyboardButton(get_text('support_button', lang), callback_data="support_menu"),
             ],
-            [InlineKeyboardButton(f"⚙️ {get_text('settings_button', lang)}", callback_data="settings")],
+            [InlineKeyboardButton(get_text('settings_button', lang), callback_data="settings")],
         ]
         
         if MINIAPP_URL and MINIAPP_URL.startswith("https://"):
             keyboard.append([
-                InlineKeyboardButton(f"📱 {get_text('cabinet_button', lang)}", web_app=WebAppInfo(url=MINIAPP_URL))
+                InlineKeyboardButton(get_text('cabinet_button', lang), web_app=WebAppInfo(url=MINIAPP_URL))
             ])
         reply_markup = InlineKeyboardMarkup(keyboard)
         # Используем безопасную функцию для редактирования/отправки
         temp_update = Update(update_id=0, callback_query=query)
-        await safe_edit_or_send_with_logo(temp_update, context, welcome_text, reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(temp_update, context, welcome_text, reply_markup=reply_markup, logo_page="main_menu")
     
     elif data == "status":
         # Backward-compat: раньше это была кнопка "Статус подписки"
@@ -5185,27 +5243,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text += f"💰 Остаток баланса: {result.get('balance', 0):.2f}\n\n"
             text += f"🎉 Опция применена к вашей подписке!"
             keyboard = [
-                [InlineKeyboardButton("🔙 Назад", callback_data="options")],
-                [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+                [InlineKeyboardButton(get_text('back', user_lang), callback_data="options")],
+                [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
             ]
-            await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown", logo_page="options")
         elif result.get("payment_url"):
             payment_url = result["payment_url"]
             text = "✅ Платеж создан.\n\n"
             text += f"Нажмите кнопку ниже, чтобы оплатить:"
             keyboard = [
-                [InlineKeyboardButton(f"💳 {get_text('go_to_payment_button', user_lang)}", url=payment_url)],
-                [InlineKeyboardButton("🔙 Назад", callback_data="options")],
-                [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+                [InlineKeyboardButton(get_text('go_to_payment_button', user_lang), url=payment_url)],
+                [InlineKeyboardButton(get_text('back', user_lang), callback_data="options")],
+                [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
             ]
-            await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await safe_edit_or_send_with_logo(update, context, text, reply_markup=InlineKeyboardMarkup(keyboard), logo_page="options")
         else:
             msg = result.get("message") or result.get("error") or get_text('error_creating_payment', user_lang)
             keyboard = [
-                [InlineKeyboardButton("🔙 Назад", callback_data="options")],
-                [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+                [InlineKeyboardButton(get_text('back', user_lang), callback_data="options")],
+                [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
             ]
-            await safe_edit_or_send_with_logo(update, context, f"❌ {msg}", reply_markup=InlineKeyboardMarkup(keyboard))
+            await safe_edit_or_send_with_logo(update, context, f"❌ {msg}", reply_markup=InlineKeyboardMarkup(keyboard), logo_page="options")
 
     elif data.startswith("opt_"):
         # opt_{optionId}
@@ -5265,11 +5323,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"💡 Введите сумму в {currency_symbol} (например: 1500 или 1500.50)"
         
         keyboard = [
-            [InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data="topup_balance")]
+            [InlineKeyboardButton(get_text('back', user_lang), callback_data="topup_balance")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+        await safe_edit_or_send_with_logo(update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="topup")
     
     elif data.startswith("topup_pay_"):
         try:
@@ -5334,7 +5392,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🤖 **Ссылка через бота:**\n"
             f"`{referral_link_telegram}`\n\n"
             f"{get_text('click_link_to_copy', user_lang)}.",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            context=context,
+            logo_page="referrals"
         )
     
     elif data == "create_ticket":
@@ -5350,7 +5410,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context,
             f"💬 **{get_text('creating_ticket', user_lang)}**\n\n"
             f"{get_text('send_ticket_subject', user_lang)}:",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            logo_page="support_menu"
         )
         context.user_data["waiting_for_ticket_subject"] = True
     
@@ -5377,7 +5438,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💬 **{get_text('reply_to_ticket', user_lang)}**\n\n"
                 f"{get_text('ticket', user_lang)} #{ticket_id}\n\n"
                 f"{get_text('send_your_reply', user_lang)}:",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                logo_page="support_menu"
             )
             context.user_data["waiting_for_ticket_reply"] = True
             context.user_data["reply_ticket_id"] = ticket_id
@@ -5487,10 +5549,10 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = currency_buttons + [
         [
-            InlineKeyboardButton(f"🌐 {get_text('language', user_lang)}", callback_data="select_language")
+            InlineKeyboardButton(get_text('language', user_lang), callback_data="select_language")
         ],
         [
-            InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data="main_menu")
+            InlineKeyboardButton(get_text('back', user_lang), callback_data="main_menu")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -5499,14 +5561,14 @@ async def show_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_update = Update(update_id=0, callback_query=query)
     if has_cards(text):
         text_clean = clean_markdown_for_cards(text)
-        await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup, logo_page="settings")
     else:
         try:
-            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="settings")
         except Exception as e:
             logger.warning(f"Error in show_settings, sending without formatting: {e}")
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup, logo_page="settings")
 
 
 async def set_currency(update: Update, context: ContextTypes.DEFAULT_TYPE, currency: str):
@@ -5612,7 +5674,7 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE, lang:
         
         keyboard = lang_buttons + [
             [
-                InlineKeyboardButton(f"🔙 {get_text('back', current_lang)}", callback_data="settings")
+                InlineKeyboardButton(get_text('back', current_lang), callback_data="settings")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -5738,8 +5800,8 @@ async def view_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE, ticket
         text += "—\n\n" # Разделитель сообщений
     
     keyboard = [
-        [InlineKeyboardButton(f"💬 {get_text('reply_button', user_lang)}", callback_data=f"reply_ticket_{ticket_id}")],
-        [InlineKeyboardButton(f"🔙 {get_text('back_to_support', user_lang)}", callback_data="support")]
+        [InlineKeyboardButton(get_text('reply_button', user_lang), callback_data=f"reply_ticket_{ticket_id}")],
+        [InlineKeyboardButton(get_text('back_to_support', user_lang), callback_data="support")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -5747,15 +5809,15 @@ async def view_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE, ticket
     temp_update = Update(update_id=0, callback_query=query)
     if has_cards(text):
         text_clean = clean_markdown_for_cards(text)
-        await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup, logo_page="support_menu")
     else:
         # Для текста без карточек используем Markdown
         try:
-            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="support_menu")
         except Exception as e:
             logger.warning(f"Error in view_ticket, sending without formatting: {e}")
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup, logo_page="support_menu")
 
 
 async def show_channel_subscription_required(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5783,17 +5845,17 @@ async def show_channel_subscription_required(update: Update, context: ContextTyp
     if query:
         temp_update = Update(update_id=0, callback_query=query)
         try:
-            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+            await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="trial")
         except Exception as e:
             logger.warning(f"Error in show_channel_subscription_required: {e}")
             text_clean = clean_markdown_for_cards(text)
-            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
+            await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup, logo_page="trial")
     else:
         try:
-            await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode="Markdown", context=context)
+            await reply_with_logo(update, text, reply_markup=reply_markup, parse_mode="Markdown", context=context, logo_page="trial")
         except Exception as e:
             logger.warning(f"Error in show_channel_subscription_required (message): {e}")
-            await reply_with_logo(update, clean_markdown_for_cards(text), reply_markup=reply_markup, context=context)
+            await reply_with_logo(update, clean_markdown_for_cards(text), reply_markup=reply_markup, context=context, logo_page="trial")
 
 
 async def register_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5978,7 +6040,7 @@ async def register_select_currency(update: Update, context: ContextTypes.DEFAULT
         text += "Не удалось зарегистрироваться. Попробуйте позже или зарегистрируйтесь на сайте:\n"
         text += f"{YOUR_SERVER_IP}/register"
         
-        keyboard = [[InlineKeyboardButton("🔙 Попробовать снова", callback_data="register_user")]]
+        keyboard = [[InlineKeyboardButton(get_text('try_again_button', lang), callback_data="register_user")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         temp_update = Update(update_id=0, callback_query=query)
@@ -6020,9 +6082,9 @@ async def register_select_currency(update: Update, context: ContextTypes.DEFAULT
     text += "🎉 Теперь вы можете использовать все функции бота!"
     
     keyboard = [
-        [InlineKeyboardButton("📊 Моя подписка", callback_data="subscription_menu")],
-        [InlineKeyboardButton("💎 Тарифы", callback_data="tariffs")],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(get_text('status_button', lang), callback_data="subscription_menu")],
+        [InlineKeyboardButton(get_text('tariffs_button', lang), callback_data="tariffs")],
+        [InlineKeyboardButton(get_text('main_menu_button', lang), callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -6075,7 +6137,7 @@ async def activate_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     result = api.activate_trial(token)
     
-    keyboard = [[InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]]
+    keyboard = [[InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Получаем настройки триала для сообщения об успехе
@@ -6341,7 +6403,7 @@ async def select_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE, tari
         text += f"\n\n❌ {get_text('no_payment_methods', user_lang)}"
     
     keyboard.append([
-        InlineKeyboardButton(f"🔙 {get_text('back_to_tariffs', user_lang)}", callback_data="tariffs")
+        InlineKeyboardButton(get_text('back_to_tariffs', user_lang), callback_data="tariffs")
     ])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -6411,8 +6473,8 @@ async def handle_payment(
                 text += f"🎉 Подписка продлена!"
                 
                 keyboard = [
-                    [InlineKeyboardButton(f"📊 {get_text('status_button', user_lang)}", callback_data="subscription_menu")],
-                    [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+                    [InlineKeyboardButton(get_text('status_button', user_lang), callback_data="subscription_menu")],
+                    [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
@@ -6421,7 +6483,7 @@ async def handle_payment(
                 return
             else:
                 message = result.get("message", "Ошибка покупки тарифа")
-                keyboard = [[InlineKeyboardButton(f"🔙 {get_text('back_to_tariffs', user_lang)}", callback_data="tariffs")]]
+                keyboard = [[InlineKeyboardButton(get_text('back_to_tariffs', user_lang), callback_data="tariffs")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 temp_update = Update(update_id=0, callback_query=query)
                 await safe_edit_or_send_with_logo(
@@ -6434,7 +6496,7 @@ async def handle_payment(
                 return
         except Exception as e:
             logger.error(f"Error in balance payment: {e}")
-            keyboard = [[InlineKeyboardButton(f"🔙 {get_text('back_to_tariffs', user_lang)}", callback_data="tariffs")]]
+            keyboard = [[InlineKeyboardButton(get_text('back_to_tariffs', user_lang), callback_data="tariffs")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             temp_update = Update(update_id=0, callback_query=query)
             await safe_edit_or_send_with_logo(
@@ -6464,8 +6526,8 @@ async def handle_payment(
         text = f"💳 {get_text('creating_payment', user_lang)}..."
         
         keyboard = [
-            [InlineKeyboardButton(f"💳 {get_text('go_to_payment_button', user_lang)}", url=payment_url)],
-            [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+            [InlineKeyboardButton(get_text('go_to_payment_button', user_lang), url=payment_url)],
+            [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -6502,7 +6564,7 @@ async def handle_payment(
             await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
     else:
         message = result.get("message", get_text('error_creating_payment', user_lang))
-        keyboard = [[InlineKeyboardButton(f"🔙 {get_text('back_to_tariffs', user_lang)}", callback_data="tariffs")]]
+        keyboard = [[InlineKeyboardButton(get_text('back_to_tariffs', user_lang), callback_data="tariffs")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         temp_update = Update(update_id=0, callback_query=query)
@@ -6555,11 +6617,11 @@ async def choose_config_for_payment(update: Update, context: ContextTypes.DEFAUL
 
     # Кнопка "новая подписка" — создаст новую подписку после успешной оплаты
     keyboard.append([
-        InlineKeyboardButton("➕ Новая подписка", callback_data=f"pay_{tariff_id}_{provider}_newcfg")
+        InlineKeyboardButton(get_text('new_subscription_button', user_lang), callback_data=f"pay_{tariff_id}_{provider}_newcfg")
     ])
 
     keyboard.append([
-        InlineKeyboardButton(f"🔙 {get_text('back_to_tariffs', user_lang)}", callback_data="tariffs")
+        InlineKeyboardButton(get_text('back_to_tariffs', user_lang), callback_data="tariffs")
     ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -6587,7 +6649,7 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfgs_resp = api.get_configs(token, force_refresh=True)
     cfgs = (cfgs_resp or {}).get('configs') or []
 
-    text = f"🧩 **{get_text('configs_button', user_lang)}**\n"
+    text = f"{get_emoji('PUZZLE')} **{get_text('configs_button', user_lang)}**\n"
     text += f"{SEPARATOR_LINE}\n"
     if not cfgs:
         text += "Подписки не найдены.\n"
@@ -6596,7 +6658,7 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for cfg in cfgs:
             name = cfg.get('config_name') or f"Подписка {cfg.get('id')}"
             is_primary = bool(cfg.get('is_primary'))
-            status = "🟢 активен" if cfg.get('is_active') else "🔴 неактивен"
+            status = f"{get_emoji('ACTIVE_GREEN')} активен" if cfg.get('is_active') else f"{get_emoji('INACTIVE')} неактивен"
             exp = cfg.get('expire_at')
             if exp and isinstance(exp, str):
                 try:
@@ -6607,7 +6669,7 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 exp_str = "—"
 
-            prefix = '⭐' if is_primary else '🧩'
+            prefix = get_emoji('STAR') if is_primary else get_emoji('PUZZLE')
             text += f"{prefix} **{name}**\n"
             text += f"{status} • до {exp_str}\n"
             text += f"{SEPARATOR_LINE}\n"
@@ -6620,17 +6682,17 @@ async def show_configs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         row = []
         if sub_url:
             row.append(InlineKeyboardButton(f"🚀 {name}", url=sub_url))
-        row.append(InlineKeyboardButton("💎 Продлить", callback_data=f"tariffs_cfg_{cfg_id}"))
-        row.append(InlineKeyboardButton("📤 Поделиться", callback_data=f"share_config_{cfg_id}"))
+        row.append(InlineKeyboardButton(get_text('extend_button', user_lang), callback_data=f"tariffs_cfg_{cfg_id}"))
+        row.append(InlineKeyboardButton(get_text('share_button', user_lang), callback_data=f"share_config_{cfg_id}"))
         keyboard.append(row)
 
-    keyboard.append([InlineKeyboardButton("➕ Новая подписка", callback_data="tariffs_newcfg")])
+    keyboard.append([InlineKeyboardButton(get_text('new_subscription_button', user_lang), callback_data="tariffs_newcfg")])
     back_to = pop_back_callback(context, "main_menu")
-    keyboard.append([InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data=back_to)])
+    keyboard.append([InlineKeyboardButton(get_text('back', user_lang), callback_data=back_to)])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     temp_update = Update(update_id=0, callback_query=query)
-    await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+    await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="configs")
 
 
 async def handle_share_config(update: Update, context: ContextTypes.DEFAULT_TYPE, config_id: int):
@@ -6690,18 +6752,19 @@ async def handle_share_config(update: Update, context: ContextTypes.DEFAULT_TYPE
         text += f"🧩 **{config_name}**\n\n"
         text += f"Чтобы поделиться этой подпиской:\n\n"
         text += f"📋 Скопируйте данное сообщение и перешлите тому, с кем хотите поделиться подпиской:\n\n"
-        text += f"`@{bot_username} {share_token}`\n\n"
+        # Без обратных кавычек и с нулевым пробелом после @ — не ссылка, удобно копировать по нажатию
+        text += f"@\u200b{bot_username} {share_token}\n\n"
         text += f"💡 Ссылка действительна 7 дней\n"
         text += f"📊 Можно использовать 1 раз\n"
         
         keyboard = [
-            [InlineKeyboardButton("📋 Скопировать токен", callback_data=f"copy_share_token_{share_token}")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="sub_configs")]
+            [InlineKeyboardButton(get_text('copy_token_button', user_lang), callback_data=f"copy_share_token_{share_token}")],
+            [InlineKeyboardButton(get_text('back', user_lang), callback_data="sub_configs")]
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         temp_update = Update(update_id=0, callback_query=query)
-        await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+        await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="configs")
         await query.answer("✅ Ссылка создана!")
         
     except Exception as e:
@@ -6715,7 +6778,13 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not inline_query:
         return
     
-    query_text = inline_query.query.strip()
+    raw = inline_query.query.strip()
+    # Если вставили полную строку «@bot_username TOKEN» — извлекаем токен
+    if raw and " " in raw and (raw.startswith("@") or "\u200b" in raw):
+        parts = raw.replace("\u200b", "").strip().split()
+        if len(parts) >= 2 and parts[0].startswith("@"):
+            raw = parts[1]
+    query_text = raw
     if not query_text:
         # Показываем инструкцию, если запрос пустой
         results = [
@@ -6864,8 +6933,8 @@ async def handle_accept_shared_config(update: Update, context: ContextTypes.DEFA
             text += f"Вы можете найти её в разделе «Подписки»."
             
             keyboard = [
-                [InlineKeyboardButton("🧩 Мои подписки", callback_data="sub_configs")],
-                [InlineKeyboardButton("🔙 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(get_text('configs_button', user_lang), callback_data="sub_configs")],
+                [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
             ]
             
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -6884,8 +6953,9 @@ async def handle_accept_shared_config(update: Update, context: ContextTypes.DEFA
                 # отправляем новое сообщение напрямую пользователю
                 try:
                     chat_id = user.id
-                    if os.path.exists(LOGO_PATH):
-                        with open(LOGO_PATH, 'rb') as logo_file:
+                    logo_path = _get_logo_path("default")
+                    if os.path.exists(logo_path):
+                        with open(logo_path, 'rb') as logo_file:
                             await context.bot.send_photo(
                                 chat_id=chat_id,
                                 photo=logo_file,
@@ -6948,11 +7018,11 @@ async def show_topup_balance(update: Update, context: ContextTypes.DEFAULT_TYPE)
     preferred_currency = user_data.get("preferred_currency", "uah")
     currency_symbol = {"uah": "₴", "rub": "₽", "usd": "$"}.get(preferred_currency, "₴")
     
-    text = f"💰 **{get_text('top_up_balance', user_lang)}**\n"
+    text = f"{get_emoji('BALANCE')} **{get_text('top_up_balance', user_lang)}**\n"
     text += "━━━━━━━━━━━━━━━\n\n"
-    text += f"💳 **{get_text('balance', user_lang)}:** {balance:.2f} {currency_symbol}\n\n"
-    text += f"📝 {get_text('enter_amount', user_lang)}:\n\n"
-    text += f"💡 {get_text('select_amount_hint', user_lang)}"
+    text += f"{get_emoji('CARD')} **{get_text('balance', user_lang)}:** {balance:.2f} {currency_symbol}\n\n"
+    text += f"{get_emoji('NOTE')} {get_text('enter_amount', user_lang)}:\n\n"
+    text += f"{get_emoji('TRIAL')} {get_text('select_amount_hint', user_lang)}"
     
     # Предустановленные суммы
     amounts = [100, 500, 1000, 2000, 5000]
@@ -6973,24 +7043,22 @@ async def show_topup_balance(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     # Кнопка для ввода своей суммы
     keyboard.append([
-        InlineKeyboardButton(f"✏️ {get_text('enter_custom_amount', user_lang)}", callback_data="topup_custom_amount")
+        InlineKeyboardButton(get_text('enter_custom_amount', user_lang), callback_data="topup_custom_amount")
     ])
     
     back_to = pop_back_callback(context, "main_menu")
     keyboard.append([
-        InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data=back_to)
+        InlineKeyboardButton(get_text('back', user_lang), callback_data=back_to)
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    # Используем безопасную функцию для редактирования/отправки
     temp_update = Update(update_id=0, callback_query=query)
     try:
-        await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown")
+        await safe_edit_or_send_with_logo(temp_update, context, text, reply_markup=reply_markup, parse_mode="Markdown", logo_page="topup")
     except Exception as e:
         logger.warning(f"Error in show_topup_balance, sending without formatting: {e}")
         text_clean = clean_markdown_for_cards(text)
-        await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
+        await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup, logo_page="topup")
 
 
 async def select_topup_method(update: Update, context: ContextTypes.DEFAULT_TYPE, amount: float):
@@ -7060,12 +7128,11 @@ async def select_topup_method(update: Update, context: ContextTypes.DEFAULT_TYPE
         keyboard.append(row)
     
     keyboard.append([
-        InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data="topup_balance")
+        InlineKeyboardButton(get_text('back', user_lang), callback_data="topup_balance")
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Если это callback query, редактируем сообщение
     if query:
         temp_update = Update(update_id=0, callback_query=query)
         try:
@@ -7074,15 +7141,19 @@ async def select_topup_method(update: Update, context: ContextTypes.DEFAULT_TYPE
             logger.warning(f"Error in select_topup_method, sending without formatting: {e}")
             text_clean = clean_markdown_for_cards(text)
             await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
-    # Если это текстовое сообщение, отправляем новое
     elif message:
         temp_update = Update(update_id=0, message=message)
+        try:
+            text = text_to_html_with_tg_emoji(text)
+            pm = "HTML"
+        except Exception:
+            pm = "Markdown"
         try:
             await reply_with_logo(
                 temp_update,
                 text,
                 reply_markup=reply_markup,
-                parse_mode="Markdown"
+                parse_mode=pm
             )
         except Exception as e:
             logger.warning(f"Markdown parsing error in select_topup_method: {e}")
@@ -7133,16 +7204,16 @@ async def handle_topup_payment(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if response.status_code == 200 and result.get("payment_url"):
             payment_url = result["payment_url"]
-            text = f"💳 **{get_text('balance_topup_created', user_lang)}**\n"
+            text = f"{get_emoji('CARD')} **{get_text('balance_topup_created', user_lang)}**\n"
             text += "━━━━━━━━━━━━━━━\n\n"
-            text += f"💵 **{get_text('amount', user_lang)}:** {amount:.0f} {currency_symbol}\n\n"
+            text += f"{get_emoji('BALANCE')} **{get_text('amount', user_lang)}:** {amount:.0f} {currency_symbol}\n\n"
             text += f"{get_text('go_to_payment_text', user_lang)}:\n\n"
             text += f"`{payment_url}`\n\n"
             text += f"{get_text('after_payment', user_lang)}"
             
             keyboard = [
-                [InlineKeyboardButton(f"💳 {get_text('go_to_payment_button', user_lang)}", url=payment_url)],
-                [InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]
+                [InlineKeyboardButton(get_text('go_to_payment_button', user_lang), url=payment_url)],
+                [InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -7155,7 +7226,7 @@ async def handle_topup_payment(update: Update, context: ContextTypes.DEFAULT_TYP
                 await safe_edit_or_send_with_logo(temp_update, context, text_clean, reply_markup=reply_markup)
         else:
             message = result.get("message", "Ошибка создания платежа")
-            keyboard = [[InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data="topup_balance")]]
+            keyboard = [[InlineKeyboardButton(get_text('back', user_lang), callback_data="topup_balance")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             temp_update = Update(update_id=0, callback_query=query)
             await safe_edit_or_send_with_logo(
@@ -7167,7 +7238,7 @@ async def handle_topup_payment(update: Update, context: ContextTypes.DEFAULT_TYP
             )
     except Exception as e:
         logger.error(f"Error in topup payment: {e}")
-        keyboard = [[InlineKeyboardButton(f"🔙 {get_text('back', user_lang)}", callback_data="topup_balance")]]
+        keyboard = [[InlineKeyboardButton(get_text('back', user_lang), callback_data="topup_balance")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         temp_update = Update(update_id=0, callback_query=query)
         await safe_edit_or_send_with_logo(
@@ -7298,7 +7369,7 @@ def main():
                     
                     if ticket_id:
                         # Создаем кнопку "Вернуться в меню"
-                        keyboard = [[InlineKeyboardButton(f"🔙 {get_text('main_menu_button', user_lang)}", callback_data="main_menu")]]
+                        keyboard = [[InlineKeyboardButton(get_text('main_menu_button', user_lang), callback_data="main_menu")]]
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         
                         await reply_with_logo(
@@ -7346,8 +7417,8 @@ def main():
                     if result.get("id") or result.get("success"):
                         # Создаем клавиатуру с кнопками "Просмотреть тикет" и "Назад"
                         keyboard = [
-                            [InlineKeyboardButton(f"💬 {get_text('ticket_view_title', user_lang)} #{ticket_id}", callback_data=f"view_ticket_{ticket_id}")],
-                            [InlineKeyboardButton(f"🔙 {get_text('back_to_support', user_lang)}", callback_data="support")]
+                            [InlineKeyboardButton(f"{get_text('ticket_view_title', user_lang)} #{ticket_id}", callback_data=f"view_ticket_{ticket_id}")],
+                            [InlineKeyboardButton(get_text('back_to_support', user_lang), callback_data="support")]
                         ]
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         

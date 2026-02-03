@@ -16,8 +16,8 @@ class UserConfig(db.Model):
     remnawave_uuid = db.Column(db.String(100), nullable=False)  # UUID аккаунта в Remna
     config_name = db.Column(db.String(100), nullable=True)  # Имя конфига для отображения (например, "Конфиг 1", "Конфиг 2")
     is_primary = db.Column(db.Boolean, default=False, nullable=False)  # Основной конфиг (первый созданный)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Связь с пользователем
     user = db.relationship('User', backref='configs')

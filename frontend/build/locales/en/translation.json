@@ -206,7 +206,7 @@
     "why_title": "Why is this needed?",
     "why_item1": "Get access to Telegram if it's blocked in your country",
     "why_item2": "Fast and stable connection through our proxy server",
-    "why_item3": "Free for all StealthNET users",
+    "why_item3": "Free for all {{serviceName}} users",
     "why_item4": "Automatic setup - just click the button",
     "note": "Note: If the button doesn't work, open this page in your mobile device's browser and click the button again.",
     "hero_title": "Use Telegram Without Restrictions",
@@ -269,7 +269,7 @@
     "linux_step7": "Enter proxy server details and click \"Save\"",
     "linux_step8": "Enable the \"Use Proxy\" toggle",
     "info_title": "Important Information",
-    "info_item1": "Proxy servers are provided free of charge to all StealthNET users",
+    "info_item1": "Proxy servers are provided free of charge to all {{serviceName}} users",
     "info_item2": "It is recommended to use SOCKS5 for better performance",
     "info_item3": "After configuring the proxy, all Telegram connections will go through our server",
     "info_item4": "If the proxy doesn't work, try switching to another type (SOCKS5 ↔ HTTP)"

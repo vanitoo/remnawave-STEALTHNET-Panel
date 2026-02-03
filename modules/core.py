@@ -112,10 +112,11 @@ def init_app(flask_app):
     app.config['MAIL_USERNAME'] = os.getenv("MAIL_USERNAME")
     app.config['MAIL_PASSWORD'] = os.getenv("MAIL_PASSWORD")
     # Устанавливаем отправителя только если MAIL_USERNAME настроен
+    mail_sender_name = os.getenv("MAIL_SENDER_NAME", "Panel").strip() or "Panel"
     if app.config['MAIL_USERNAME']:
-        app.config['MAIL_DEFAULT_SENDER'] = ('StealthNET', app.config['MAIL_USERNAME'])
+        app.config['MAIL_DEFAULT_SENDER'] = (mail_sender_name, app.config['MAIL_USERNAME'])
     else:
-        app.config['MAIL_DEFAULT_SENDER'] = ('StealthNET', 'noreply@stealthnet.app')
+        app.config['MAIL_DEFAULT_SENDER'] = (mail_sender_name, os.getenv("MAIL_DEFAULT_EMAIL", "noreply@example.com"))
 
     if 'mail' not in app.extensions:
         mail.init_app(app)

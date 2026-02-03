@@ -81,7 +81,7 @@ class Payment(db.Model):
     status = db.Column(db.String(20), nullable=False, default='PENDING')
     amount = db.Column(db.Float, nullable=False)
     currency = db.Column(db.String(5), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     payment_system_id = db.Column(db.String(100), nullable=True)
     payment_provider = db.Column(db.String(20), nullable=True, default='crystalpay')
     promo_code_id = db.Column(db.Integer, db.ForeignKey('promo_code.id'), nullable=True)

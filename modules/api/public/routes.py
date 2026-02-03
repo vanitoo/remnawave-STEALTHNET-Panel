@@ -444,7 +444,7 @@ def get_system_info():
             },
             "branding": {
                 "logo_url": branding.logo_url if branding else "",
-                "company_name": branding.site_name if branding else "StealthNet",
+                "company_name": (branding.site_name or "").strip() if branding else "",
                 "primary_color": getattr(branding, 'primary_color', '#007bff') if branding else "#007bff"
             },
             "bot": {
@@ -457,7 +457,7 @@ def get_system_info():
     except Exception as e:
         return jsonify({
             "system": {"maintenance_mode": False, "registration_enabled": True, "telegram_auth_enabled": False},
-            "branding": {"logo_url": "", "company_name": "StealthNet", "primary_color": "#007bff"},
+            "branding": {"logo_url": "", "company_name": "", "primary_color": "#007bff"},
             "bot": {"enabled": False, "username": ""},
             "server_time": datetime.now(timezone.utc).isoformat()
         }), 200
@@ -534,8 +534,10 @@ def public_bot_config():
         bot_username = bot_username[1:]
     
     if not config:
+        branding = BrandingSetting.query.first()
+        fallback_name = (branding.site_name or "").strip() if branding else "Панель"
         return jsonify({
-            "service_name": "StealthNET",
+            "service_name": fallback_name,
             "bot_username": bot_username,  # Используем из .env если есть
             "support_url": "",
             "support_bot_username": "",
@@ -563,7 +565,8 @@ def public_bot_config():
             "channel_url": "",
             "channel_subscription_texts": {"ru": "", "ua": "", "en": "", "cn": ""},
             "bot_link_for_miniapp": "",
-            "buttons_order": ["trial", "connect", "status", "tariffs", "options", "referrals", "support", "settings", "webapp"]
+            "buttons_order": ["trial", "connect", "status", "tariffs", "options", "referrals", "support", "settings", "webapp"],
+            "bot_page_logos": {}
         }), 200
     
     # Все переводы в одном объекте (как в старом коде app.py)
@@ -604,8 +607,10 @@ def public_bot_config():
         "cn": getattr(config, 'channel_subscription_text_cn', '') or ""
     }
     
+    branding = BrandingSetting.query.first()
+    fallback_name = (branding.site_name or "").strip() if branding else "Панель"
     return jsonify({
-        "service_name": config.service_name or "StealthNET",
+        "service_name": config.service_name or fallback_name,
         "bot_username": bot_username,  # Добавлено для deep links
         "support_url": (config.support_url or "").strip(),
         "support_bot_username": (config.support_bot_username or "").lstrip("@").strip(),
@@ -633,7 +638,8 @@ def public_bot_config():
         "channel_url": config.channel_url or "",
         "channel_subscription_texts": channel_subscription_texts if channel_subscription_texts else {"ru": "", "ua": "", "en": "", "cn": ""},
         "bot_link_for_miniapp": config.bot_link_for_miniapp or "",
-        "buttons_order": json.loads(config.buttons_order) if hasattr(config, 'buttons_order') and config.buttons_order else ["trial", "connect", "status", "tariffs", "options", "referrals", "support", "settings", "webapp"]
+        "buttons_order": json.loads(config.buttons_order) if hasattr(config, 'buttons_order') and config.buttons_order else ["trial", "connect", "status", "tariffs", "options", "referrals", "support", "settings", "webapp"],
+        "bot_page_logos": json.loads(config.bot_page_logos) if getattr(config, 'bot_page_logos', None) else {}
     }), 200
 
 

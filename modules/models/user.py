@@ -26,7 +26,7 @@ class User(db.Model):
     preferred_currency = db.Column(db.String(5), default='uah')
     telegram_id = db.Column(db.String(50), unique=True, nullable=True)
     telegram_username = db.Column(db.String(100), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Блокировка аккаунта
     is_blocked = db.Column(db.Boolean, default=False, nullable=False)

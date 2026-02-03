@@ -13,7 +13,7 @@ class Ticket(db.Model):
     user = db.relationship('User', backref=db.backref('tickets', lazy=True))
     subject = db.Column(db.String(200), nullable=False)
     status = db.Column(db.String(20), nullable=False, default='OPEN')  # OPEN, IN_PROGRESS, RESOLVED, CLOSED
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class TicketMessage(db.Model):
@@ -25,6 +25,6 @@ class TicketMessage(db.Model):
     sender = db.relationship('User')
     message = db.Column(db.Text, nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 

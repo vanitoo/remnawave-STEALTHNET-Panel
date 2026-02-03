@@ -10,7 +10,7 @@ modules/api/webhooks/routes.py -> /api/webhook/yoomoney
 
 from urllib.parse import urlencode
 
-from modules.api.payments.base import get_payment_settings, decrypt_key, get_return_url
+from modules.api.payments.base import get_payment_settings, decrypt_key, get_return_url, get_service_name_for_payment
 
 
 YOOMONEY_QUICKPAY_URL = "https://yoomoney.ru/quickpay/confirm.xml"
@@ -49,7 +49,7 @@ def create_yoomoney_payment(amount: float, currency: str, order_id: str, **kwarg
         payment_type = "AC"
 
     return_url = get_return_url(kwargs.get("source", "miniapp"), kwargs.get("miniapp_type", "v2"))
-    targets = kwargs.get("description") or f"StealthNET #{order_id}"
+    targets = kwargs.get("description") or f"{get_service_name_for_payment()} #{order_id}"
 
     params = {
         "receiver": receiver,
