@@ -1,14 +1,16 @@
 <!DOCTYPE html>
+<!-- design: STELS-style v2 -->
 <html lang="ru" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#0f1629">
+    <meta name="theme-color" content="#1a2234">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <title>VPN</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -42,11 +44,12 @@
             --bg-primary: #fafbfc;
             --bg-secondary: #f3f4f6;
             --bg-tertiary: #e5e7eb;
-            --body-bg: #fafbfc;
+            --body-bg: linear-gradient(160deg, #fafbfc 0%, #f0f1ff 50%, #e8f4ff 100%);
             
             --glass-bg: rgba(255, 255, 255, 0.85);
             --glass-border: rgba(0, 0, 0, 0.06);
             --glass-blur: saturate(180%) blur(20px);
+            --glass-edge: rgba(255, 255, 255, 0.9);
             --bg-glass: var(--glass-bg);
             
             --border-color: var(--glass-border);
@@ -62,6 +65,8 @@
             --radius: 16px;
             --radius-lg: 24px;
             --radius-xl: 32px;
+            --bento-radius: 16px;
+            --bento-radius-lg: 20px;
             
             --success: #10b981;
             --accent-green: #10b981;
@@ -76,73 +81,124 @@
             --gradient-card: linear-gradient(145deg, rgba(99, 102, 241, 0.06) 0%, rgba(6, 182, 212, 0.04) 100%);
         }
 
+        :root[data-theme="light"] {
+            color-scheme: light;
+        }
+
         :root[data-theme="dark"] {
             color-scheme: dark;
-            --tg-theme-bg-color: #0f1629;
+            /* Тёмная тема — светлее: серо-синий фон вместо почти чёрного */
+            --color-dark-50: 248, 250, 252;
+            --color-dark-100: 241, 245, 249;
+            --color-dark-400: 148, 163, 184;
+            --color-dark-500: 100, 116, 139;
+            --color-dark-700: 51, 65, 85;
+            --color-dark-900: 15, 23, 42;
+            --color-dark-950: 10, 15, 26;
+            --color-accent-400: 96, 165, 250;
+            --color-accent-500: 59, 130, 246;
+            --tg-theme-bg-color: #1a2234;
             --tg-theme-text-color: #f1f5f9;
             --tg-theme-hint-color: #94a3b8;
-            --tg-theme-link-color: #818cf8;
-            --tg-theme-button-color: #6366f1;
+            --tg-theme-link-color: #60a5fa;
+            --tg-theme-button-color: #3b82f6;
             --tg-theme-button-text-color: #ffffff;
-            --tg-theme-secondary-bg-color: #151d35;
+            --tg-theme-secondary-bg-color: #243044;
+            --bento-radius: 16px;
+            --bento-radius-lg: 24px;
+            --bento-padding: 20px;
             
-            --primary: #818cf8;
-            --primary-rgb: 129, 140, 248;
-            --primary-glow: rgba(129, 140, 248, 0.4);
-            --primary-dark: #6366f1;
-            --primary-hover: #a5b4fc;
-            --secondary: #c084fc;
-            --accent: #22d3ee;
-            --accent-purple: #c084fc;
+            --primary: #60a5fa;
+            --primary-rgb: 59, 130, 246;
+            --primary-glow: rgba(59, 130, 246, 0.3);
+            --primary-dark: #2563eb;
+            --primary-hover: #93c5fd;
+            --secondary: #818cf8;
+            --accent: #60a5fa;
+            --accent-purple: #a78bfa;
             
             --text-primary: #f1f5f9;
             --text-secondary: #94a3b8;
             --text-muted: #64748b;
             
-            --bg-primary: #0f1629;
-            --bg-secondary: #151d35;
-            --bg-tertiary: #1e2a47;
-            --body-bg: #0f1629;
+            --bg-primary: #1a2234;
+            --bg-secondary: #243044;
+            --bg-tertiary: #2d3a52;
+            --body-bg: #1a2234;
             
-            --glass-bg: rgba(21, 29, 53, 0.85);
-            --glass-border: rgba(255, 255, 255, 0.06);
-            --glass-blur: saturate(180%) blur(20px);
+            --glass-bg: rgba(36, 48, 68, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-blur: blur(20px);
+            --glass-edge: rgba(255, 255, 255, 0.12);
             --bg-glass: var(--glass-bg);
             
-            --border-color: var(--glass-border);
-            --border-glow: rgba(129, 140, 248, 0.3);
+            --border-color: rgba(71, 85, 105, 0.35);
+            --border-glow: rgba(59, 130, 246, 0.3);
             
             --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
-            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-            --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
-            --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
-            --shadow-glow: 0 0 60px rgba(129, 140, 248, 0.2);
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+            --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+            --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.4);
+            --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
             
-            --success: #34d399;
-            --accent-green: #34d399;
-            --warning: #fbbf24;
-            --danger: #f87171;
-            --accent-red: #f87171;
-            --accent-orange: #fb923c;
+            --success: #22c55e;
+            --accent-green: #22c55e;
+            --warning: #eab308;
+            --danger: #ef4444;
+            --accent-red: #ef4444;
+            --accent-orange: #f97316;
             
-            --surface-muted: rgba(255, 255, 255, 0.05);
-            --surface-strong: rgba(129, 140, 248, 0.15);
-            --tariff-card-bg: rgba(30, 42, 71, 0.9);
-            --tariff-card-border: rgba(255, 255, 255, 0.1);
-            --gradient-primary: linear-gradient(135deg, rgba(129, 140, 248, 0.15) 0%, rgba(192, 132, 252, 0.1) 100%);
-            --gradient-card: linear-gradient(145deg, rgba(129, 140, 248, 0.08) 0%, rgba(34, 211, 238, 0.04) 100%);
+            --surface-muted: rgba(71, 85, 105, 0.2);
+            --surface-strong: rgba(59, 130, 246, 0.12);
+            --tariff-card-bg: rgba(36, 48, 68, 0.9);
+            --tariff-card-border: rgba(71, 85, 105, 0.35);
+            --gradient-primary: rgba(59, 130, 246, 0.1);
+            --gradient-card: rgba(36, 48, 68, 0.85);
         }
 
         body {
-            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--body-bg);
             color: var(--text-primary);
             min-height: 100vh;
             overflow-x: hidden;
             line-height: 1.6;
-            transition: background 0.4s ease, color 0.3s ease;
-            background-attachment: fixed;
             letter-spacing: -0.01em;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+            opacity: 0.04;
+            mix-blend-mode: overlay;
+        }
+        :root[data-theme="dark"] body {
+            background: 
+                radial-gradient(ellipse 120% 80% at 50% -20%, rgba(99, 102, 246, 0.18), transparent 45%),
+                radial-gradient(ellipse 90% 70% at 95% 90%, rgba(139, 92, 246, 0.12), transparent 45%),
+                radial-gradient(ellipse 70% 90% at 5% 85%, rgba(59, 130, 246, 0.1), transparent 45%),
+                radial-gradient(ellipse 60% 60% at 50% 50%, rgba(88, 80, 236, 0.06), transparent 50%),
+                #1a2234;
+        }
+        :root[data-theme="dark"] body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            background-image: 
+                radial-gradient(1.5px 1.5px at 15px 25px, rgba(255,255,255,0.55), transparent),
+                radial-gradient(1px 1px at 80px 60px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(2px 2px at 140px 15px, rgba(255,255,255,0.35), transparent),
+                radial-gradient(1.5px 1.5px at 200px 90px, rgba(255,255,255,0.45), transparent),
+                radial-gradient(1px 1px at 270px 140px, rgba(255,255,255,0.35), transparent),
+                radial-gradient(1.5px 1.5px at 50px 160px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(1px 1px at 180px 200px, rgba(255,255,255,0.3), transparent);
+            background-size: 300px 220px;
+            opacity: 0.55;
         }
 
         .container {
@@ -217,31 +273,56 @@
             stroke: none;
         }
 
-        /* Cards */
+        /* Карточки — стекло (glassmorphism) */
         .card {
             background: var(--glass-bg);
             backdrop-filter: var(--glass-blur);
             -webkit-backdrop-filter: var(--glass-blur);
             border: 1px solid var(--glass-border);
-            border-radius: var(--radius-lg);
-            padding: 24px;
+            border-radius: var(--bento-radius);
+            padding: var(--bento-padding, 20px);
             margin-bottom: 16px;
-            box-shadow: var(--shadow-sm);
-            transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+            box-shadow: 
+                inset 0 1px 0 0 var(--glass-edge),
+                0 4px 24px rgba(0, 0, 0, 0.12);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
             animation: fadeIn 0.4s ease;
+        }
+        :root[data-theme="dark"] .card {
+            box-shadow: 
+                inset 0 1px 0 0 var(--glass-edge),
+                0 8px 32px rgba(0, 0, 0, 0.25);
         }
 
         .card:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-md);
-            border-color: rgba(var(--primary-rgb), 0.15);
+            border-color: var(--glass-border);
+            box-shadow: 
+                inset 0 1px 0 0 var(--glass-edge),
+                0 8px 32px rgba(0, 0, 0, 0.18);
+        }
+        :root[data-theme="dark"] .card:hover {
+            box-shadow: 
+                inset 0 1px 0 0 var(--glass-edge),
+                0 12px 40px rgba(0, 0, 0, 0.35);
         }
         
         .card-hero {
             position: relative;
             overflow: hidden;
-            background: var(--bg-secondary);
-            border: 1px solid rgba(var(--primary-rgb), 0.15);
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            box-shadow: 
+                inset 0 1px 0 0 var(--glass-edge),
+                0 4px 24px rgba(0, 0, 0, 0.12);
+        }
+        :root[data-theme="dark"] .card-hero {
+            box-shadow: 
+                inset 0 1px 0 0 var(--glass-edge),
+                0 8px 32px rgba(0, 0, 0, 0.25);
+        }
+        
+        .card-hero::before {
+            display: none;
         }
         
         .card-hero > * {
@@ -250,13 +331,14 @@
         }
         
         .gradient-card {
-            position: relative;
-            overflow: hidden;
-            background: var(--gradient-card);
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            box-shadow: inset 0 1px 0 0 var(--glass-edge);
         }
         
         .accent-card {
-            background: var(--gradient-primary);
+            background: rgba(59, 130, 246, 0.12);
+            border-color: rgba(59, 130, 246, 0.3);
         }
         
         .softer-card {
@@ -271,8 +353,8 @@
         }
 
         .card-title {
-            font-size: 17px;
-            font-weight: 700;
+            font-size: 18px;
+            font-weight: 600;
             color: var(--text-primary);
             display: flex;
             align-items: center;
@@ -286,7 +368,7 @@
         
         .widget-title {
             font-size: 15px;
-            font-weight: 700;
+            font-weight: 600;
             color: var(--text-primary);
             margin-bottom: 20px;
             display: flex;
@@ -310,15 +392,16 @@
             gap: 6px;
             letter-spacing: 0.02em;
             text-transform: uppercase;
+            border: 1px solid transparent;
         }
 
         .status-active {
-            background: rgba(16, 185, 129, 0.12);
+            background: rgba(34, 197, 94, 0.15);
             color: var(--accent-green);
         }
 
         .status-inactive {
-            background: rgba(239, 68, 68, 0.12);
+            background: rgba(239, 68, 68, 0.15);
             color: var(--accent-red);
         }
 
@@ -353,7 +436,8 @@
             align-items: center;
             padding: 12px 16px;
             background: var(--surface-muted);
-            border-radius: var(--radius);
+            border-radius: var(--bento-radius);
+            border: 1px solid transparent;
             transition: background 0.2s ease;
         }
 
@@ -431,43 +515,27 @@
 
         /* Buttons */
         .btn {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            color: white;
+            background: var(--primary);
+            color: var(--tg-theme-button-text-color, white);
             border: none;
-            border-radius: 100px;
+            border-radius: 12px;
             padding: 14px 28px;
             font-size: 15px;
             font-weight: 600;
             font-family: inherit;
             cursor: pointer;
-            transition: all 0.25s ease;
+            transition: background 0.2s ease, transform 0.2s ease;
             width: 100%;
             margin-top: 12px;
-            box-shadow: var(--shadow-sm), 0 0 0 0 rgba(var(--primary-rgb), 0.3);
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .btn::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 50%);
-            opacity: 0;
-            transition: opacity 0.25s ease;
         }
 
         .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-md), 0 0 30px rgba(var(--primary-rgb), 0.3);
-        }
-
-        .btn:hover::before {
-            opacity: 1;
+            background: var(--primary-dark);
+            transform: translateY(-1px);
         }
 
         .btn:active {
@@ -485,7 +553,6 @@
             border-color: var(--primary);
             color: var(--primary);
             background: var(--surface-strong);
-            box-shadow: var(--shadow-sm);
         }
         
         .btn-icon {
@@ -754,18 +821,19 @@
         }
         
         :root[data-theme="dark"] .tariff-accordion-header {
-            background: rgba(30, 42, 71, 0.9) !important;
-            border-color: rgba(255, 255, 255, 0.12) !important;
+            background: var(--glass-bg) !important;
+            border-color: var(--glass-border) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
         }
         
         :root[data-theme="dark"] .tariff-card {
-            background: rgba(30, 42, 71, 0.9) !important;
-            border-color: rgba(255, 255, 255, 0.12) !important;
+            background: var(--glass-bg) !important;
+            border-color: var(--glass-border) !important;
         }
         
         :root[data-theme="dark"] .tariff-card:hover {
-            background: rgba(129, 140, 248, 0.15) !important;
-            border-color: rgba(129, 140, 248, 0.4) !important;
+            background: var(--surface-strong) !important;
+            border-color: rgba(var(--primary-rgb), 0.3) !important;
         }
 
         .tariff-card:hover {
@@ -804,11 +872,113 @@
             font-family: 'JetBrains Mono', monospace;
         }
 
+        /* Карточка варианта тарифа (срок + цена) в модалке */
+        .tariff-detail-option {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            padding: 16px 18px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            box-shadow: var(--shadow-xs);
+            margin-bottom: 0;
+        }
+        .tariff-detail-option:hover {
+            background: var(--surface-strong);
+            border-color: rgba(var(--primary-rgb), 0.35);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-sm);
+        }
+        .tariff-detail-option .option-duration {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            line-height: 1.3;
+        }
+        .tariff-detail-option .option-period {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+        .tariff-detail-option .option-limits {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 6px;
+            line-height: 1.4;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .tariff-detail-option > div > div:first-child {
+            min-width: 0;
+        }
+        .tariff-detail-option .option-price {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--primary);
+            font-family: 'JetBrains Mono', monospace;
+            line-height: 1.2;
+            display: inline-flex;
+            align-items: baseline;
+            gap: 6px;
+            flex-wrap: nowrap;
+            flex-shrink: 0;
+            margin-left: 12px;
+        }
+        .tariff-detail-option .option-price .tariff-price-old {
+            font-size: 13px;
+            color: var(--text-muted);
+            text-decoration: line-through;
+            margin-right: 6px;
+        }
+
         .tariff-price-old {
             text-decoration: line-through;
             color: var(--text-muted);
             font-size: 0.85em;
             margin-right: 6px;
+        }
+        /* Цена со скидкой в основной карточке тарифа — перечёркивание и в одну строку */
+        .tariff-accordion-header .tariff-price-old {
+            text-decoration: line-through;
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin-right: 6px;
+        }
+        .tariff-accordion-price-line {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 6px;
+            flex-wrap: nowrap;
+        }
+        /* Строка Трафик/Устр. — не даём перекрывать блоком цены */
+        .tariff-accordion-traffic-row {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            min-width: 0;
+        }
+        .tariff-accordion-traffic-row .tariff-accordion-devices {
+            flex-shrink: 0;
+            margin-left: auto;
+        }
+        /* Блок цены в карточке — ограничиваем ширину, чтобы не перекрывал Устр. */
+        .tariff-accordion-price-block {
+            flex: 1;
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
+        }
+        .tariff-accordion-price-block .tariff-accordion-price-line {
+            min-width: 0;
+        }
+        /* Верхний блок (название + Трафик/Устр.) — даём сжиматься по ширине */
+        .tariff-accordion-header > div > div:first-child {
+            min-width: 0;
+        }
+        .tariff-accordion-header .tariff-accordion-price-block + .btn {
+            flex-shrink: 0;
         }
 
         /* Server Items */
@@ -819,7 +989,7 @@
         }
 
         .server-card {
-            background: var(--bg-secondary);
+            background: var(--surface-muted);
             border: 1px solid var(--glass-border);
             border-radius: var(--radius);
             padding: 16px;
@@ -827,7 +997,7 @@
         }
 
         .server-card:hover {
-            background: var(--bg-tertiary);
+            background: var(--surface-strong);
             border-color: rgba(var(--primary-rgb), 0.2);
             transform: translateY(-2px);
         }
@@ -1390,7 +1560,7 @@
         }
         
         :root[data-theme="dark"] .modal-content {
-            background: rgba(30, 42, 71, 0.95);
+            background: rgba(26, 26, 37, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.12);
             box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
         }
@@ -1462,28 +1632,32 @@
             background: var(--surface-strong);
         }
 
-        /* Bottom Navigation */
+        /* Bottom Navigation — стеклянная таблетка */
         .bottom-nav {
             position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
+            left: 16px;
+            right: 16px;
+            bottom: calc(16px + var(--safe-bottom));
+            max-width: 448px;
+            margin: 0 auto;
             background: var(--glass-bg);
             backdrop-filter: var(--glass-blur);
             -webkit-backdrop-filter: var(--glass-blur);
-            border-top: 1px solid var(--glass-border);
-            padding: 10px 0 calc(10px + var(--safe-bottom));
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 8px 4px;
             z-index: 1000;
             box-sizing: border-box;
+            box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow-md);
+        }
+        :root[data-theme="light"] .bottom-nav {
+            box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow-sm);
         }
 
         .bottom-nav-items {
             display: flex;
-            justify-content: space-between;
+            justify-content: space-around;
             align-items: center;
-            max-width: 480px;
-            margin: 0 auto;
-            padding: 0 8px;
             gap: 2px;
             box-sizing: border-box;
         }
@@ -1492,16 +1666,17 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 4px;
-            padding: 8px 6px;
+            gap: 2px;
+            padding: 8px 4px;
             cursor: pointer;
-            border-radius: var(--radius);
+            border-radius: 16px;
             transition: all 0.2s ease;
             color: var(--text-muted);
             flex: 1 1 0;
-            text-align: center;
             min-width: 0;
+            text-align: center;
             user-select: none;
+            position: relative;
         }
 
         .nav-item:hover {
@@ -1514,7 +1689,7 @@
 
         .nav-item.active .nav-item-icon {
             background: var(--surface-strong);
-            border-radius: 12px;
+            border-radius: 16px;
             padding: 6px 14px;
         }
 
@@ -1526,16 +1701,17 @@
         }
 
         .nav-item-icon .icon {
-            width: 22px;
-            height: 22px;
+            width: 20px;
+            height: 20px;
         }
 
         .nav-item-label {
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 600;
-            letter-spacing: 0.02em;
-            line-height: 1.1;
-            max-width: 100%;
+            letter-spacing: 0.01em;
+            line-height: 1.15;
+            width: 100%;
+            min-width: 0;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -1557,34 +1733,105 @@
             padding-bottom: 80px;
         }
 
-        /* Options page: make group headers look like section labels (avoid "duplicate" card look) */
-        #pageOptions #optionsList .tariff-card[style*="cursor: default"] {
-            background: transparent;
-            border: none;
-            box-shadow: none;
-            padding: 0;
-            margin: 10px 0 6px;
+        /* Блок опций: группы и карточки */
+        .option-group {
+            margin-bottom: 20px;
         }
-        #pageOptions #optionsList .tariff-card[style*="cursor: default"]:hover {
-            transform: none;
-            background: transparent;
-            border-color: transparent;
+        .option-group:last-child {
+            margin-bottom: 0;
         }
-        #pageOptions #optionsList .tariff-card[style*="cursor: default"] .tariff-info {
-            flex-direction: row;
-            align-items: baseline;
+        .option-group-header {
+            display: flex;
+            align-items: center;
             gap: 10px;
+            margin-bottom: 10px;
+            padding: 0 2px;
         }
-        #pageOptions #optionsList .tariff-card[style*="cursor: default"] .tariff-name {
+        .option-group-header .option-group-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 10px;
+            background: rgba(var(--primary-rgb), 0.12);
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .option-group-header .option-group-icon .icon {
+            width: 16px;
+            height: 16px;
+        }
+        .option-group-header .option-group-title {
             font-size: 12px;
-            font-weight: 800;
-            letter-spacing: 0.08em;
+            font-weight: 700;
+            letter-spacing: 0.06em;
             text-transform: uppercase;
             color: var(--text-muted);
         }
-        #pageOptions #optionsList .tariff-card[style*="cursor: default"] .tariff-duration {
+        .option-group-header .option-group-count {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: auto;
+        }
+        .option-item {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            box-shadow: var(--shadow-xs);
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        .option-item:last-child {
+            margin-bottom: 0;
+        }
+        .option-item:hover {
+            background: var(--surface-strong);
+            border-color: rgba(var(--primary-rgb), 0.35);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-sm);
+        }
+        .option-item-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-sm);
+            background: rgba(var(--primary-rgb), 0.12);
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .option-item-icon .icon {
+            width: 22px;
+            height: 22px;
+        }
+        .option-item-body {
+            flex: 1;
+            min-width: 0;
+        }
+        .option-item-name {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+            line-height: 1.3;
+        }
+        .option-item-desc {
             font-size: 12px;
             color: var(--text-secondary);
+            line-height: 1.4;
+        }
+        .option-item-price {
+            font-size: 17px;
+            font-weight: 700;
+            color: var(--primary);
+            font-family: 'JetBrains Mono', monospace;
+            flex-shrink: 0;
         }
 
         /* Mobile: prevent input+button rows from overflowing */
@@ -1597,7 +1844,14 @@
             }
         }
 
-        /* Extra small screens: keep bottom nav items inside viewport */
+        /* Узкие экраны: ещё мельче подпись, чтобы влезала */
+        @media (max-width: 400px) {
+            .nav-item-label {
+                font-size: 10px;
+            }
+        }
+
+        /* Очень узкие: подписи скрываем, только иконки */
         @media (max-width: 360px) {
             .bottom-nav-items {
                 padding: 0 6px;
@@ -1650,7 +1904,7 @@
             align-items: flex-start;
         }
 
-        /* Theme Toggle */
+        /* Theme Toggle — как карточка STELS */
         .theme-toggle {
             position: absolute;
             top: 20px;
@@ -1658,27 +1912,29 @@
             z-index: 100;
             width: 44px;
             height: 44px;
-            border-radius: 12px;
+            border-radius: 16px;
             border: 1px solid var(--glass-border);
             background: var(--glass-bg);
             backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
             color: var(--text-primary);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: var(--shadow-sm);
-            transition: all 0.25s ease;
+            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+            transition: all 0.2s ease;
+        }
+        :root[data-theme="light"] .theme-toggle {
+            box-shadow: var(--shadow-sm), inset 0 1px 0 0 rgba(0, 0, 0, 0.03);
         }
 
         .theme-toggle:hover {
-            transform: scale(1.05);
-            box-shadow: var(--shadow-md);
             border-color: var(--primary);
         }
 
         .theme-toggle:active {
-            transform: scale(0.95);
+            transform: scale(0.98);
         }
 
         /* Utility Classes */
@@ -1694,6 +1950,99 @@
         .mb-2 { margin-bottom: 8px; }
         .mb-3 { margin-bottom: 12px; }
         .mb-4 { margin-bottom: 16px; }
+
+        /* Dashboard — структура как у STELS */
+        .dashboard-header {
+            margin-bottom: 24px;
+        }
+        .dashboard-header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+        }
+        .dashboard-header p {
+            margin-top: 4px;
+            font-size: 0.9375rem;
+            color: var(--text-secondary);
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .bento-tile {
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--bento-radius);
+            padding: 20px;
+            box-shadow: inset 0 1px 0 0 var(--glass-edge);
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease;
+            text-align: left;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+        .bento-tile:hover {
+            border-color: var(--border-color);
+            background: var(--bg-secondary);
+        }
+        .bento-tile .tile-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .bento-tile .tile-label .arrow {
+            color: var(--text-muted);
+            transition: color 0.2s ease;
+        }
+        .bento-tile:hover .tile-label .arrow {
+            color: var(--primary);
+        }
+        .bento-tile .stat-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .bento-tile .stat-value.accent {
+            color: var(--primary);
+        }
+        .bento-tile .stat-value.success {
+            color: var(--accent-green);
+        }
+        .subscription-card-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px 16px;
+            margin-bottom: 20px;
+        }
+        .subscription-card-grid .grid-label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+        .subscription-card-grid .grid-value {
+            font-size: 0.9375rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .subscription-card-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 20px;
+        }
+        .subscription-card-actions.single {
+            grid-template-columns: 1fr;
+        }
 
         /* Section Headers */
         .section-label {
@@ -1919,69 +2268,99 @@
                 </div>
             </div>
 
-            <!-- Page 1: Subscription (was Info) -->
+            <!-- Page 1: Dashboard — структура как у STELS -->
             <div id="pageInfo" class="page active" style="padding-bottom: 100px;">
-                <!-- Subscription Status Card -->
+                <!-- Заголовок приветствия -->
+                <div class="dashboard-header">
+                    <h1 id="dashboardWelcomeTitle">Добро пожаловать</h1>
+                    <p id="dashboardWelcomeSubtitle">Ваша подписка</p>
+                </div>
+
+                <!-- Карточка подписки (bento): заголовок + сетка 2x2 + прогресс + кнопки -->
                 <div class="card card-hero">
-                    <div class="card-header">
-                        <div class="card-title">
-                            <svg class="icon"><use href="#icon-chart"/></svg>
-                            <span id="subscriptionStatusTitle">Статус подписки</span>
+                    <div class="card-header" style="margin-bottom: 20px;">
+                        <div>
+                            <div class="card-title" style="margin-bottom: 4px;">
+                                <svg class="icon"><use href="#icon-chart"/></svg>
+                                <span id="subscriptionStatusTitle">Статус подписки</span>
+                            </div>
+                            <div id="tariffName" class="text-muted" style="font-size: 13px; display: none;"></div>
                         </div>
                         <span id="subscriptionStatus" class="status-badge status-inactive">
                             <span class="status-dot offline"></span>
                             Неактивна
                         </span>
                     </div>
-                    <div class="info-grid">
-                        <div class="info-item">
-                            <span class="info-label">
-                                <svg class="icon icon-sm"><use href="#icon-calendar"/></svg>
-                                <span id="expiresLabel">Истекает</span>
-                            </span>
-                            <span id="expireDate" class="info-value">-</span>
+                    <div class="subscription-card-grid">
+                        <div>
+                            <div class="grid-label" id="expiresLabel">Истекает</div>
+                            <div id="expireDate" class="grid-value">-</div>
                         </div>
-                        <div class="info-item">
-                            <span class="info-label">
-                                <svg class="icon icon-sm"><use href="#icon-clock"/></svg>
-                                <span id="daysLeftLabel">Осталось дней</span>
-                            </span>
-                            <span id="daysLeft" class="info-value">-</span>
+                        <div>
+                            <div class="grid-label"><span id="trafficLabel">Трафик</span></div>
+                            <div id="traffic" class="grid-value">-</div>
                         </div>
-                        <div class="info-item">
-                            <span class="info-label">
-                                <svg class="icon icon-sm"><use href="#icon-server"/></svg>
-                                <span id="devicesLabel">Устройств</span>
-                            </span>
-                            <span id="devicesValue" class="info-value">-</span>
+                        <div>
+                            <div class="grid-label" id="devicesLabel">Устройств</div>
+                            <div id="devicesValue" class="grid-value">-</div>
                         </div>
-                        <div class="info-item">
-                            <span class="info-label">
-                                <svg class="icon icon-sm"><use href="#icon-activity"/></svg>
-                                <span id="trafficLabel">Трафик</span>
-                            </span>
-                            <span id="traffic" class="info-value">-</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">
-                                <svg class="icon icon-sm"><use href="#icon-wallet"/></svg>
-                                <span id="balanceLabel">Баланс</span>
-                            </span>
-                            <span id="userBalance" class="info-value success">-</span>
+                        <div>
+                            <div class="grid-label" id="daysLeftLabel">Осталось</div>
+                            <div id="daysLeft" class="grid-value">-</div>
                         </div>
                     </div>
-                    <div id="connectButtonContainer" style="margin-top: 20px; display: none;">
+                    <div id="trafficProgress" class="progress-bar hidden" style="margin-bottom: 20px;">
+                        <div id="trafficProgressFill" class="progress-fill" style="width: 0%"></div>
+                    </div>
+                    <div id="connectButtonContainer" class="subscription-card-actions" style="display: none;">
+                        <button type="button" class="btn btn-secondary" onclick="switchPage('tariffs')">
+                            <span id="viewSubscriptionText">Тарифы</span>
+                        </button>
                         <button id="connectButton" class="btn" onclick="handleConnectClick(event)">
                             <svg class="icon"><use href="#icon-rocket"/></svg>
                             <span id="connectButtonText">Подключиться</span>
                         </button>
                     </div>
-                    <div id="trafficProgress" class="progress-bar hidden">
-                        <div id="trafficProgressFill" class="progress-fill" style="width: 0%"></div>
+                    <div id="subscriptionCardActionsNoConnect" class="subscription-card-actions single" style="display: none;">
+                        <button type="button" class="btn" onclick="switchPage('tariffs')">
+                            <span id="viewSubscriptionText2">Перейти к тарифам</span>
+                        </button>
                     </div>
                 </div>
 
-                <!-- Configs List Card -->
+                <!-- Bento-сетка: Баланс, Подписка, Рефералы, Заработок -->
+                <div class="stats-grid">
+                    <a href="javascript:void(0)" class="bento-tile" onclick="var el = document.getElementById('balanceTopupForm'); if(el) el.scrollIntoView({behavior:'smooth', block:'center'});">
+                        <div class="tile-label">
+                            <span id="balanceTileLabel">Баланс</span>
+                            <svg class="icon arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+                        </div>
+                        <div id="userBalance" class="stat-value accent">-</div>
+                    </a>
+                    <a href="javascript:void(0)" class="bento-tile" onclick="switchPage('tariffs')">
+                        <div class="tile-label">
+                            <span id="subscriptionTileLabel">Подписка</span>
+                            <svg class="icon arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+                        </div>
+                        <div id="subscriptionDaysBento" class="stat-value">-</div>
+                    </a>
+                    <a href="javascript:void(0)" class="bento-tile" onclick="switchPage('profile')">
+                        <div class="tile-label">
+                            <span id="referralsTileLabel">Рефералы</span>
+                            <svg class="icon arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+                        </div>
+                        <div id="referralCount" class="stat-value">0</div>
+                    </a>
+                    <a href="javascript:void(0)" class="bento-tile" onclick="switchPage('profile')">
+                        <div class="tile-label">
+                            <span id="earningsTileLabel">Заработок</span>
+                            <svg class="icon arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+                        </div>
+                        <div id="referralEarnings" class="stat-value success">0</div>
+                    </a>
+                </div>
+
+                <!-- Конфиги -->
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title">
@@ -2109,10 +2488,8 @@
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Page 4: Options -->
-            <div id="pageOptions" class="page" style="padding-bottom: 80px;">
+                <!-- Опции (внутри раздела Тарифы) -->
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title">
@@ -2128,7 +2505,7 @@
                 </div>
             </div>
 
-            <!-- Page 5: Profile -->
+            <!-- Page 4: Profile -->
             <div id="pageProfile" class="page">
                 <!-- Support (opens modal) -->
                 <div class="card">
@@ -2323,12 +2700,6 @@
                 </div>
                 <div class="nav-item-label">Тарифы</div>
             </div>
-            <div class="nav-item" onclick="switchPage('options')" id="navOptions">
-                <div class="nav-item-icon">
-                    <svg class="icon"><use href="#icon-plus"/></svg>
-                </div>
-                <div class="nav-item-label">Опции</div>
-            </div>
             <div class="nav-item" onclick="switchPage('profile')" id="navProfile">
                 <div class="nav-item-icon">
                     <svg class="icon"><use href="#icon-users"/></svg>
@@ -2337,7 +2708,7 @@
             </div>
             <div class="nav-item" onclick="switchPage('casino')" id="navCasino" style="display: none;">
                 <div class="nav-item-icon">
-                    <svg class="icon"><use href="#icon-diamond"/></svg>
+                    <svg class="icon"><use href="#icon-star"/></svg>
                 </div>
                 <div class="nav-item-label">Фортуна</div>
             </div>
@@ -2514,7 +2885,16 @@
         const translations = {
             ru: {
                 loading: 'Загрузка...',
+                welcome: 'Добро пожаловать',
+                welcomeName: 'Добро пожаловать, {name}',
+                yourSubscription: 'Ваша подписка',
                 subscriptionStatus: 'Статус подписки',
+                balanceTileLabel: 'Баланс',
+                subscriptionTileLabel: 'Подписка',
+                referralsTileLabel: 'Рефералы',
+                earningsTileLabel: 'Заработок',
+                viewSubscriptionText: 'Тарифы',
+                viewSubscriptionText2: 'Перейти к тарифам',
                 active: 'Активна',
                 inactive: 'Неактивна',
                 expires: 'Истекает:',
@@ -2630,7 +3010,16 @@
             },
             ua: {
                 loading: 'Завантаження...',
+                welcome: 'Ласкаво просимо',
+                welcomeName: 'Ласкаво просимо, {name}',
+                yourSubscription: 'Ваша підписка',
                 subscriptionStatus: 'Статус підписки',
+                balanceTileLabel: 'Баланс',
+                subscriptionTileLabel: 'Підписка',
+                referralsTileLabel: 'Реферали',
+                earningsTileLabel: 'Заробіток',
+                viewSubscriptionText: 'Тарифи',
+                viewSubscriptionText2: 'Перейти до тарифів',
                 active: 'Активна',
                 inactive: 'Неактивна',
                 expires: 'Закінчується:',
@@ -2746,7 +3135,16 @@
             },
             en: {
                 loading: 'Loading...',
+                welcome: 'Welcome',
+                welcomeName: 'Welcome, {name}',
+                yourSubscription: 'Your subscription',
                 subscriptionStatus: 'Subscription Status',
+                balanceTileLabel: 'Balance',
+                subscriptionTileLabel: 'Subscription',
+                referralsTileLabel: 'Referrals',
+                earningsTileLabel: 'Earnings',
+                viewSubscriptionText: 'Tariffs',
+                viewSubscriptionText2: 'View tariffs',
                 active: 'Active',
                 inactive: 'Inactive',
                 expires: 'Expires:',
@@ -2862,7 +3260,16 @@
             },
             cn: {
                 loading: '加载中...',
+                welcome: '欢迎',
+                welcomeName: '欢迎，{name}',
+                yourSubscription: '您的订阅',
                 subscriptionStatus: '订阅状态',
+                balanceTileLabel: '余额',
+                subscriptionTileLabel: '订阅',
+                referralsTileLabel: '推荐',
+                earningsTileLabel: '收益',
+                viewSubscriptionText: '套餐',
+                viewSubscriptionText2: '查看套餐',
                 active: '活跃',
                 inactive: '非活跃',
                 expires: '到期:',
@@ -3054,6 +3461,20 @@
             const promoCodeTitle = document.getElementById('promoCodeTitle');
             if (promoCodeTitle) promoCodeTitle.textContent = t('promoCode');
             
+            if (typeof updateDashboardWelcome === 'function') updateDashboardWelcome();
+            const balanceTileLabel = document.getElementById('balanceTileLabel');
+            if (balanceTileLabel) balanceTileLabel.textContent = t('balanceTileLabel');
+            const subscriptionTileLabel = document.getElementById('subscriptionTileLabel');
+            if (subscriptionTileLabel) subscriptionTileLabel.textContent = t('subscriptionTileLabel');
+            const referralsTileLabel = document.getElementById('referralsTileLabel');
+            if (referralsTileLabel) referralsTileLabel.textContent = t('referralsTileLabel');
+            const earningsTileLabel = document.getElementById('earningsTileLabel');
+            if (earningsTileLabel) earningsTileLabel.textContent = t('earningsTileLabel');
+            const viewSubscriptionText = document.getElementById('viewSubscriptionText');
+            if (viewSubscriptionText) viewSubscriptionText.textContent = t('viewSubscriptionText');
+            const viewSubscriptionText2 = document.getElementById('viewSubscriptionText2');
+            if (viewSubscriptionText2) viewSubscriptionText2.textContent = t('viewSubscriptionText2');
+            
             // Обновляем метки полей
             const expiresLabel = document.getElementById('expiresLabel');
             if (expiresLabel) expiresLabel.textContent = t('expires');
@@ -3128,6 +3549,8 @@
             currentTheme = theme;
             document.documentElement.setAttribute('data-theme', theme);
             localStorage.setItem('preferredTheme', theme);
+            var metaTheme = document.querySelector('meta[name="theme-color"]');
+            if (metaTheme) metaTheme.setAttribute('content', theme === 'dark' ? '#1a2234' : '#fafbfc');
             updateThemeToggle();
         }
         
@@ -3424,8 +3847,8 @@
                 loadServers();
             }
 
-            // Если переключились на страницу опций, загружаем опции
-            if (page === 'options' && !purchaseOptionsLoaded) {
+            // Опции загружаются на странице тарифов
+            if (page === 'tariffs' && !purchaseOptionsLoaded) {
                 loadPurchaseOptions();
             }
 
@@ -3732,8 +4155,30 @@
                 }
                 
                 updateSubscriptionInfo();
+                updateDashboardWelcome();
                 updateFloatingButton();
                 updateLanguageUI();
+                
+                // Реферальная статистика для bento-плиток
+                try {
+                    const refResp = await fetch('/miniapp/referrals/stats', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ initData: tg.initData || '' })
+                    });
+                    if (refResp.ok) {
+                        const refData = await refResp.json();
+                        const rc = document.getElementById('referralCount');
+                        const re = document.getElementById('referralEarnings');
+                        if (rc) rc.textContent = String(refData.referrals_count ?? refData.total_referrals ?? 0);
+                        if (re) {
+                            const earn = refData.total_earnings ?? refData.earnings ?? 0;
+                            const cur = currentCurrency || 'uah';
+                            const sym = cur === 'uah' ? '₴' : cur === 'rub' ? '₽' : '$';
+                            re.textContent = (typeof earn === 'number' ? earn.toFixed(2) : earn) + ' ' + sym;
+                        }
+                    }
+                } catch (e) { console.warn('Referral stats load:', e); }
                 
                 // Обновляем кнопку подключения после обновления информации о подписке
                 setTimeout(() => {
@@ -4332,6 +4777,15 @@
             }
         }
 
+        function updateDashboardWelcome() {
+            const titleEl = document.getElementById('dashboardWelcomeTitle');
+            const subtitleEl = document.getElementById('dashboardWelcomeSubtitle');
+            if (!titleEl || !subtitleEl) return;
+            const name = (userData && (userData.first_name || userData.firstName || userData.username)) ? (userData.first_name || userData.firstName || userData.username) : '';
+            titleEl.textContent = name ? (t('welcomeName') || 'Добро пожаловать, ').replace('{name}', name) : (t('welcome') || 'Добро пожаловать');
+            subtitleEl.textContent = t('yourSubscription') || 'Ваша подписка';
+        }
+
         function updateSubscriptionInfo() {
             if (!userData) return;
 
@@ -4339,12 +4793,15 @@
             const statusBadge = document.getElementById('subscriptionStatus');
             const expireDateEl = document.getElementById('expireDate');
             const daysLeftEl = document.getElementById('daysLeft');
+            const daysBentoEl = document.getElementById('subscriptionDaysBento');
             const devicesEl = document.getElementById('devicesValue');
             const trafficEl = document.getElementById('traffic');
             const trafficProgress = document.getElementById('trafficProgress');
             const trafficProgressFill = document.getElementById('trafficProgressFill');
             const userEmailEl = document.getElementById('userEmail');
             const userPasswordEl = document.getElementById('userPassword');
+            const connectContainer = document.getElementById('connectButtonContainer');
+            const noConnectActions = document.getElementById('subscriptionCardActionsNoConnect');
 
             if (isActive) {
                 statusBadge.innerHTML = `<span class="status-dot online"></span>${t('active')}`;
@@ -4352,11 +4809,14 @@
 
                 if (userData.expireAt) {
                     const expireDate = new Date(userData.expireAt);
+                    const daysText = (() => {
+                        const now = new Date();
+                        const daysLeft = Math.ceil((expireDate - now) / (1000 * 60 * 60 * 24));
+                        return daysLeft > 0 ? `${daysLeft} ${t('days')}` : t('expired');
+                    })();
                     expireDateEl.textContent = expireDate.toLocaleDateString(currentLanguage === 'ru' ? 'ru-RU' : currentLanguage === 'ua' ? 'uk-UA' : currentLanguage === 'en' ? 'en-US' : 'zh-CN');
-                    
-                    const now = new Date();
-                    const daysLeft = Math.ceil((expireDate - now) / (1000 * 60 * 60 * 24));
-                    daysLeftEl.textContent = daysLeft > 0 ? `${daysLeft} ${t('days')}` : t('expired');
+                    daysLeftEl.textContent = daysText;
+                    if (daysBentoEl) daysBentoEl.textContent = daysText;
                 }
 
                 // Устройств из тарифа
@@ -4392,10 +4852,15 @@
                 statusBadge.className = 'status-badge status-inactive';
                 expireDateEl.textContent = '-';
                 daysLeftEl.textContent = '-';
+                if (daysBentoEl) daysBentoEl.textContent = t('inactive') || 'Неактивна';
                 if (devicesEl) devicesEl.textContent = '-';
                 trafficEl.textContent = '-';
                 trafficProgress.classList.add('hidden');
             }
+
+            var subUrl = getSubscriptionUrl && getSubscriptionUrl();
+            if (connectContainer) connectContainer.style.display = (isActive && subUrl) ? 'grid' : 'none';
+            if (noConnectActions) noConnectActions.style.display = (isActive && !subUrl) || !isActive ? 'grid' : 'none';
 
             // Обновляем email и пароль
             if (userEmailEl) {
@@ -4867,18 +5332,18 @@
                 }
                 
                 // Форматируем трафик
-                let trafficText = 'Безлимит';
+                let trafficText = '∞';
                 if (trafficLimit > 0) {
                     const trafficGB = (trafficLimit / (1024 ** 3)).toFixed(0);
                     trafficText = `${trafficGB} GB`;
                 }
                 
-                // Форматируем устройства - если есть значение и оно > 0, показываем число, иначе безлимит
+                // Форматируем устройства - если есть значение и оно > 0, показываем число, иначе ∞
                 let deviceText = '';
                 if (deviceLimit !== null && deviceLimit > 0) {
-                    deviceText = `${deviceLimit} Устройства`;
+                    deviceText = `${deviceLimit} устр.`;
                 } else {
-                    deviceText = '∞ Безлимит';
+                    deviceText = '∞';
                 }
 
                 const priceHtml = hasDiscount
@@ -4892,20 +5357,19 @@
                                     <div style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px;">
                                         ${safeName}
                                     </div>
-                                    <div style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">
-                                        <span style="color: var(--primary); font-weight: 600;">∞</span>
-                                        <span>${trafficText}</span>
-                                        <span style="margin-left: auto; color: var(--text-muted);">${deviceText}</span>
+                                    <div class="tariff-accordion-traffic-row" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">
+                                        <span style="min-width: 0;">Трафик: <span style="color: var(--primary); font-weight: 600;">${trafficText}</span></span>
+                                        <span class="tariff-accordion-devices" style="color: var(--text-muted);">Устр.: ${deviceText}</span>
                                     </div>
                                 </div>
-                                <div style="border-top: 1px solid var(--glass-border); padding-top: 8px; display: flex; justify-content: space-between; align-items: flex-end;">
-                                    <div>
+                                <div style="border-top: 1px solid var(--glass-border); padding-top: 8px; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px;">
+                                    <div class="tariff-accordion-price-block">
                                         <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 2px;">от</div>
-                                        <div style="font-size: 18px; font-weight: 700; color: var(--primary); font-family: 'JetBrains Mono', monospace;">
+                                        <div class="tariff-accordion-price-line" style="font-size: 18px; font-weight: 700; color: var(--primary); font-family: 'JetBrains Mono', monospace;">
                                             ${priceHtml}
                                         </div>
                                     </div>
-                                    <button class="btn" onclick="event.stopPropagation(); openTariffDetailsModal('${safeCode}')" style="background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); padding: 8px 18px; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap;">
+                                    <button class="btn" onclick="event.stopPropagation(); openTariffDetailsModal('${safeCode}')" style="flex-shrink: 0; background: var(--primary); color: white; border: none; border-radius: var(--radius-sm); padding: 8px 18px; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap;">
                                         Купить
                                     </button>
                                 </div>
@@ -4968,41 +5432,43 @@
             const currencyConfig = currencyMap[currency] || currencyMap['uah'];
 
             const groups = [
-                { key: 'traffic', title: '📊 Трафик', items: purchaseOptions.traffic || [] },
-                { key: 'devices', title: '📱 Устройства', items: purchaseOptions.devices || [] },
-                { key: 'squad', title: '👥 Сквады', items: purchaseOptions.squad || [] },
+                { key: 'traffic', title: 'Трафик', iconId: 'icon-activity', items: purchaseOptions.traffic || [] },
+                { key: 'devices', title: 'Устройства', iconId: 'icon-server', items: purchaseOptions.devices || [] },
+                { key: 'squad', title: 'Сквады', iconId: 'icon-users', items: purchaseOptions.squad || [] },
             ];
 
             let html = '';
             groups.forEach((g) => {
                 if (!g.items.length) return;
                 html += `
-                    <div class="tariff-card" style="cursor: default; margin-bottom: 10px;">
-                        <div class="tariff-info">
-                            <div class="tariff-name">${g.title}</div>
-                            <div class="tariff-duration">${g.items.length} шт.</div>
+                    <div class="option-group">
+                        <div class="option-group-header">
+                            <div class="option-group-icon"><svg class="icon"><use href="#${g.iconId}"/></svg></div>
+                            <span class="option-group-title">${escapeHtml(g.title)}</span>
+                            <span class="option-group-count">${g.items.length} шт.</span>
                         </div>
-                    </div>
                 `;
-
                 html += g.items.map((opt) => {
                     const price = Number(opt[currencyConfig.field] || 0);
                     const desc = opt.description ? String(opt.description) : '';
                     const value = opt.value ? String(opt.value) : '';
                     const unit = opt.unit ? String(opt.unit) : '';
                     const badge = value ? `${value}${unit ? (' ' + unit) : ''}` : '';
-                    const icon = opt.icon ? String(opt.icon) : '📦';
+                    const name = escapeHtml(opt.name || 'Опция');
+                    const descLine = [badge, desc].filter(Boolean).join(' • ');
 
                     return `
-                        <div class="tariff-card" onclick="selectPurchaseOption(${opt.id})" style="margin-bottom: 8px; cursor: pointer;">
-                            <div class="tariff-info">
-                                <div class="tariff-name">${icon} ${opt.name || 'Опция'}</div>
-                                <div class="tariff-duration">${badge}${desc ? (' • ' + desc) : ''}</div>
+                        <div class="option-item" onclick="selectPurchaseOption(${opt.id})" role="button" tabindex="0">
+                            <div class="option-item-icon"><svg class="icon"><use href="#icon-gift"/></svg></div>
+                            <div class="option-item-body">
+                                <div class="option-item-name">${name}</div>
+                                ${descLine ? `<div class="option-item-desc">${escapeHtml(descLine)}</div>` : ''}
                             </div>
-                            <div class="tariff-price">${price.toFixed(2)} ${currencyConfig.symbol}</div>
+                            <div class="option-item-price">${price.toFixed(2)} ${currencyConfig.symbol}</div>
                         </div>
                     `;
                 }).join('');
+                html += '</div>';
             });
 
             list.innerHTML = html;
@@ -5125,14 +5591,14 @@
             // Сортируем тарифы по длительности
             tierTariffs.sort((a, b) => (a.duration_days || 0) - (b.duration_days || 0));
             
-            // Создаем HTML для деталей
+            // Создаем HTML для деталей (лимиты считаем для каждого тарифа отдельно)
             let html = `
                 <div style="margin-bottom: 20px;">
                     ${features}
                 </div>
-                <div style="margin-bottom: 20px;">
+                <div style="margin-bottom: 8px;">
                     <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary);">Доступные тарифы:</h3>
-                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
             `;
             
             tierTariffs.forEach(tariff => {
@@ -5142,6 +5608,22 @@
                 const tariffId = tariff.id || tariff.tariff_id;
                 const bonusDays = Number(tariff.bonus_days) || 0;
                 const days = tariff.duration_days || 0;
+                
+                // Лимиты этого конкретного тарифа (трафик и устройства) — читаем оба формата полей
+                const trafficLimitBytes = Number(tariff.traffic_limit_bytes ?? tariff.trafficLimitBytes ?? 0) || 0;
+                const hwRaw = tariff.hwid_device_limit ?? tariff.hwidDeviceLimit;
+                let deviceLimitNum = null;
+                if (hwRaw !== null && hwRaw !== undefined && hwRaw !== '') {
+                    const num = Number(hwRaw);
+                    if (!isNaN(num) && num >= 0) deviceLimitNum = num;
+                }
+                let trafficLabel = '∞';
+                if (trafficLimitBytes > 0) {
+                    trafficLabel = (trafficLimitBytes / (1024 ** 3)).toFixed(0) + ' GB';
+                }
+                const deviceLabel = (deviceLimitNum !== null && deviceLimitNum > 0)
+                    ? (deviceLimitNum + ' устр.')
+                    : '∞';
                 
                 // Форматируем описание длительности
                 let durationDescription = '';
@@ -5170,29 +5652,19 @@
                     durationDescription = `${years} ${years === 1 ? 'год' : years < 5 ? 'года' : 'лет'}`;
                 }
                 
-                const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-                const cardBg = isDark ? 'rgba(30, 42, 71, 0.9)' : 'var(--glass-bg)';
-                const cardBorder = isDark ? 'rgba(255, 255, 255, 0.12)' : 'var(--glass-border)';
-                const cardHoverBg = isDark ? 'rgba(129, 140, 248, 0.15)' : 'var(--surface-strong)';
-                const cardHoverBorder = isDark ? 'rgba(129, 140, 248, 0.4)' : 'rgba(var(--primary-rgb), 0.3)';
-                
                 const priceDisplay = hasDiscount
                     ? `<span class="tariff-price-old">${price.toFixed(2)} ${currencyConfig.symbol}</span>${finalPrice.toFixed(2)} ${currencyConfig.symbol}`
                     : `${price.toFixed(2)} ${currencyConfig.symbol}`;
+                const durationLine = days + ' ' + t('daysWord') + (bonusDays > 0 ? ' <span style="color: var(--accent-primary); font-size: 12px; font-weight: 600;">+' + bonusDays + ' ' + t('daysWord') + '</span>' : '');
                 html += `
-                    <div class="tariff-card" onclick="selectTariff(${tariffId})" style="cursor: pointer; padding: 12px 16px; border-radius: var(--radius); border: 1px solid ${cardBorder}; background: ${cardBg}; transition: all 0.2s ease; margin-bottom: 0;" onmouseover="this.style.background='${cardHoverBg}'; this.style.borderColor='${cardHoverBorder}'; this.style.transform='translateY(-2px)'; this.style.boxShadow='var(--shadow-sm)';" onmouseout="this.style.background='${cardBg}'; this.style.borderColor='${cardBorder}'; this.style.transform='translateY(0)'; this.style.boxShadow='none';">
+                    <div class="tariff-detail-option" onclick="selectTariff(${tariffId})" role="button" tabindex="0">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                             <div style="flex: 1;">
-                                <div style="font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; line-height: 1.3;">
-                                    ${days} ${t('daysWord')}${bonusDays > 0 ? ` <span style="color: var(--accent-primary); font-size: 12px; font-weight: 600;">+${bonusDays} ${t('daysWord')}</span>` : ''}
-                                </div>
-                                ${durationDescription ? `<div style="font-size: 12px; color: var(--text-secondary); line-height: 1.4;">${durationDescription}</div>` : ''}
+                                <div class="option-duration">${durationLine}</div>
+                                ${durationDescription ? `<div class="option-period">${durationDescription}</div>` : ''}
+                                <div class="option-limits">Трафик: ${escapeHtml(trafficLabel)} · Устр.: ${escapeHtml(deviceLabel)}</div>
                             </div>
-                            <div style="text-align: right; margin-left: 12px;">
-                                <div style="font-size: 17px; font-weight: 700; color: var(--primary); font-family: 'JetBrains Mono', monospace; line-height: 1.2;">
-                                    ${priceDisplay}
-                                </div>
-                            </div>
+                            <div class="option-price">${priceDisplay}</div>
                         </div>
                     </div>
                 `;
