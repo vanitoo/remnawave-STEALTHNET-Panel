@@ -5591,30 +5591,7 @@
             // Сортируем тарифы по длительности
             tierTariffs.sort((a, b) => (a.duration_days || 0) - (b.duration_days || 0));
             
-            // Лимиты тарифа (трафик и устройства) — из первого тарифа tier
-            const firstTariff = tierTariffs[0];
-            const trafficLimitBytes = Number(firstTariff.traffic_limit_bytes) || 0;
-            let deviceLimitNum = null;
-            for (const t of tierTariffs) {
-                const limit = t.hwid_device_limit;
-                if (limit !== null && limit !== undefined && limit !== '') {
-                    const num = Number(limit);
-                    if (!isNaN(num) && num > 0) {
-                        deviceLimitNum = num;
-                        break;
-                    }
-                }
-            }
-            let trafficLabel = '∞';
-            if (trafficLimitBytes > 0) {
-                const trafficGB = (trafficLimitBytes / (1024 ** 3)).toFixed(0);
-                trafficLabel = trafficGB + ' GB';
-            }
-            const deviceLabel = (deviceLimitNum !== null && deviceLimitNum > 0)
-                ? (deviceLimitNum + ' устр.')
-                : '∞';
-            
-            // Создаем HTML для деталей (блок лимитов убран — показываем в каждой карточке)
+            // Создаем HTML для деталей (лимиты считаем для каждого тарифа отдельно)
             let html = `
                 <div style="margin-bottom: 20px;">
                     ${features}
@@ -5631,6 +5608,22 @@
                 const tariffId = tariff.id || tariff.tariff_id;
                 const bonusDays = Number(tariff.bonus_days) || 0;
                 const days = tariff.duration_days || 0;
+                
+                // Лимиты этого конкретного тарифа (трафик и устройства) — читаем оба формата полей
+                const trafficLimitBytes = Number(tariff.traffic_limit_bytes ?? tariff.trafficLimitBytes ?? 0) || 0;
+                const hwRaw = tariff.hwid_device_limit ?? tariff.hwidDeviceLimit;
+                let deviceLimitNum = null;
+                if (hwRaw !== null && hwRaw !== undefined && hwRaw !== '') {
+                    const num = Number(hwRaw);
+                    if (!isNaN(num) && num >= 0) deviceLimitNum = num;
+                }
+                let trafficLabel = '∞';
+                if (trafficLimitBytes > 0) {
+                    trafficLabel = (trafficLimitBytes / (1024 ** 3)).toFixed(0) + ' GB';
+                }
+                const deviceLabel = (deviceLimitNum !== null && deviceLimitNum > 0)
+                    ? (deviceLimitNum + ' устр.')
+                    : '∞';
                 
                 // Форматируем описание длительности
                 let durationDescription = '';
